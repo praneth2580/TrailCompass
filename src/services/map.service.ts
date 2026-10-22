@@ -51,8 +51,10 @@ const ROUTE_LAYER = 'trailcompass-route-line';
 export class MapLibreAdapter implements MapAdapter {
   private map: MapLibreMap | null = null;
   private positionMarker: Marker | null = null;
+  private destinationMarker: Marker | null = null;
   private framedToPosition = false;
   private styleLoaded = false;
+  private clickListeners = new Set<(coordinate: Coordinate) => void>();
   private statusListeners = new Set<(status: MapDataStatus) => void>();
   private status: MapDataStatus = {
     ok: false,
@@ -103,8 +105,63 @@ export class MapLibreAdapter implements MapAdapter {
       });
     });
 
+    map.on('click', (event) => {
+      if (this.map !== map) return;
+      const coordinate: Coordinate = [event.lngLat.lng, event.lngLat.lat];
+      for (const listener of this.clickListeners) listener(coordinate);
+    });
+
     this.map = map;
     return map;
+  }
+
+  subscribeClick(listener: (coordinate: Coordinate) => void): () => void {
+    this.clickListeners.add(listener);
+    return () => this.clickListeners.delete(listener);
+  }
+
+  setDestination(coordinate: Coordinate | null): void {
+    if (!this.map) return;
+    if (!coordinate) {
+      this.destinationMarker?.remove();
+      this.destinationMarker = null;
+      return;
+    }
+    const lngLat: [number, number] = [coordinate[0], coordinate[1]];
+    if (!this.destinationMarker) {
+      const el = document.createElement('div');
+      el.className = 'tc-destination-marker';
+      el.setAttribute('aria-label', 'Destination');
+      this.destinationMarker = new Marker({ element: el, anchor: 'bottom' })
+        .setLngLat(lngLat)
+        .addTo(this.map);
+    } else {
+      this.destinationMarker.setLngLat(lngLat);
+    }
+  }
+
+  fitBounds(
+    west: number,
+    south: number,
+    east: number,
+    north: number,
+    padding = 48,
+  ): void {
+    if (!this.map) return;
+    this.framedToPosition = true;
+    this.map.fitBounds(
+      [
+        [west, south],
+        [east, north],
+      ],
+      { padding, duration: 700 },
+    );
+  }
+
+  getCenter(): Coordinate | null {
+    if (!this.map) return null;
+    const c = this.map.getCenter();
+    return [c.lng, c.lat];
   }
 
   showPosition(coordinate: Coordinate, _headingDegrees?: number | null): void {
@@ -130,6 +187,30 @@ export class MapLibreAdapter implements MapAdapter {
       center: lngLat,
       duration: 400,
       ...(frameZoom ? { zoom: INITIAL_FOLLOW_ZOOM } : {}),
+    });
+  }
+
+  /** Jump to a coordinate (e.g. “my location”) and zoom to street level. */
+  centerOn(coordinate: Coordinate, zoom = INITIAL_FOLLOW_ZOOM): void {
+    if (!this.map) return;
+    const lngLat: [number, number] = [coordinate[0], coordinate[1]];
+    this.framedToPosition = true;
+
+    if (!this.positionMarker) {
+      const el = document.createElement('div');
+      el.className = 'tc-position-marker';
+      el.setAttribute('aria-label', 'Current GPS position');
+      this.positionMarker = new Marker({ element: el })
+        .setLngLat(lngLat)
+        .addTo(this.map);
+    } else {
+      this.positionMarker.setLngLat(lngLat);
+    }
+
+    this.map.easeTo({
+      center: lngLat,
+      zoom,
+      duration: 550,
     });
   }
 
@@ -179,6 +260,9 @@ export class MapLibreAdapter implements MapAdapter {
   dispose(): void {
     this.positionMarker?.remove();
     this.positionMarker = null;
+    this.destinationMarker?.remove();
+    this.destinationMarker = null;
+    this.clickListeners.clear();
     this.framedToPosition = false;
     this.styleLoaded = false;
     this.map?.remove();

@@ -28,17 +28,17 @@ export class CompassService {
       try {
         const result = await doe.requestPermission();
         if (result !== 'granted') {
-          this.emitUnavailable('Orientation permission denied — compass unavailable');
+          this.emitUnavailable('Permission denied');
           return;
         }
       } catch {
-        this.emitUnavailable('Unable to request orientation permission');
+        this.emitUnavailable('Permission failed');
         return;
       }
     }
 
     if (!('DeviceOrientationEvent' in window)) {
-      this.emitUnavailable('Device orientation sensors unavailable on this device');
+      this.emitUnavailable('No sensors');
       return;
     }
 
@@ -50,7 +50,7 @@ export class CompassService {
       headingDegrees: null,
       accuracy: 'unavailable',
       needsCalibration: true,
-      message: 'Waiting for compass sensors… wave the phone in a figure-8 to calibrate',
+      message: 'Waiting for sensors',
       timestampMs: Date.now(),
     });
   }
@@ -83,7 +83,7 @@ export class CompassService {
         headingDegrees: null,
         accuracy: 'unavailable',
         needsCalibration: true,
-        message: 'Compass data unavailable — check sensors and calibration',
+        message: 'No reading',
         timestampMs: Date.now(),
       });
       return;
@@ -101,10 +101,7 @@ export class CompassService {
       headingDegrees: this.smoothed,
       accuracy,
       needsCalibration: accuracy === 'low',
-      message:
-        accuracy === 'low'
-          ? 'Relative orientation only — calibrate away from metal mounts'
-          : undefined,
+      message: accuracy === 'low' ? 'Low accuracy' : undefined,
       timestampMs: Date.now(),
     });
   };

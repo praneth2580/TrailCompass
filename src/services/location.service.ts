@@ -16,6 +16,31 @@ export function formatAccuracy(fix: GpsFix | null): string {
   return `±${Math.round(fix.accuracyMeters)} m`;
 }
 
+/** Short label for the ride HUD chip (errors can be verbose from the browser). */
+export function formatGpsChipLabel(
+  fix: GpsFix | null,
+  error?: string,
+  options?: { stale?: boolean },
+): string {
+  if (fix) {
+    const accuracy = formatAccuracy(fix);
+    return options?.stale ? `${accuracy} · stale` : accuracy;
+  }
+  if (!error) return 'Acquiring…';
+  const lower = error.toLowerCase();
+  if (lower.includes('denied') || lower.includes('permission')) {
+    return 'Permission denied';
+  }
+  if (lower.includes('unavailable') || lower.includes('disabled')) {
+    return 'Unavailable';
+  }
+  if (lower.includes('timeout')) return 'Timed out';
+  if (lower.includes('secure') || lower.includes('only secure')) {
+    return 'Needs HTTPS';
+  }
+  return 'No fix';
+}
+
 /**
  * GPS / location service using Capacitor Geolocation.
  * Handles permission denial gracefully.

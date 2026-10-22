@@ -1,16 +1,29 @@
 :root {
-  --tc-bg: #0b1210;
-  --tc-bg-elevated: #14201c;
-  --tc-panel: rgba(12, 22, 18, 0.92);
-  --tc-text: #f2f5f1;
-  --tc-muted: #9aaf9f;
-  --tc-accent: #f5a623;
+  --tc-bg: #06100c;
+  --tc-bg-elevated: #101c17;
+  --tc-panel: rgba(7, 16, 12, 0.82);
+  --tc-panel-solid: #0c1712;
+  --tc-text: #eef3ec;
+  --tc-muted: #8aa194;
+  --tc-accent: #f0a020;
   --tc-accent-dim: #c47d10;
+  --tc-accent-soft: rgba(240, 160, 32, 0.14);
   --tc-danger: #ff6b4a;
-  --tc-ok: #5dce8a;
-  --tc-border: #2a3d34;
-  --tc-font-display: "Segoe UI", "Trebuchet MS", sans-serif;
-  --tc-font-body: "Segoe UI", "Trebuchet MS", sans-serif;
+  --tc-ok: #4fcf84;
+  --tc-border: rgba(255, 255, 255, 0.09);
+  --tc-border-strong: rgba(240, 160, 32, 0.4);
+  --tc-font-display: "Chakra Petch", "Segoe UI", sans-serif;
+  --tc-font-body: "DM Sans", "Segoe UI", sans-serif;
+  --tc-font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --tc-safe-top: env(safe-area-inset-top, 0px);
+  --tc-safe-right: env(safe-area-inset-right, 0px);
+  --tc-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --tc-safe-left: env(safe-area-inset-left, 0px);
+  --tc-radius: 16px;
+  --tc-radius-sm: 10px;
+  --tc-touch: 48px;
+  --tc-pad: 0.9rem;
+  --tc-shadow: 0 10px 28px rgba(0, 0, 0, 0.38);
   color-scheme: dark;
 }
 
@@ -28,15 +41,14 @@ body,
   height: 100%;
   overflow: hidden;
   font-family: var(--tc-font-body);
-  background:
-    radial-gradient(1200px 600px at 10% -10%, #1a3328 0%, transparent 55%),
-    radial-gradient(900px 500px at 100% 0%, #243018 0%, transparent 50%),
-    var(--tc-bg);
+  background: var(--tc-bg);
   color: var(--tc-text);
+  -webkit-tap-highlight-color: transparent;
 }
 
 button {
   font: inherit;
+  touch-action: manipulation;
 }
 
 .tc-app {
@@ -44,50 +56,12 @@ button {
   flex-direction: column;
   height: 100%;
   min-height: 100dvh;
+  background: var(--tc-bg);
 }
 
-.tc-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.75rem 1rem;
-  background: var(--tc-panel);
-  border-bottom: 2px solid var(--tc-border);
-  z-index: 2;
-}
-
-.tc-brand {
-  margin: 0;
-  font-family: var(--tc-font-display);
-  font-size: clamp(1.5rem, 4vw, 2rem);
-  font-weight: 800;
-  letter-spacing: 0.02em;
-  color: var(--tc-accent);
-}
-
-.tc-nav {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.tc-tab {
-  min-height: 48px;
-  min-width: 96px;
-  padding: 0.6rem 1rem;
-  border: 2px solid var(--tc-border);
-  border-radius: 8px;
-  background: var(--tc-bg-elevated);
-  color: var(--tc-text);
-  font-size: 1.05rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.tc-tab-active {
-  border-color: var(--tc-accent);
-  color: var(--tc-accent);
-}
+/* ── Map screen ─────────────────────────────────────────── */
+/* Main is already above the bottom nav (flex sibling).
+   Map fills that area fully — do NOT subtract nav height again. */
 
 .tc-main {
   position: relative;
@@ -97,30 +71,13 @@ button {
   flex-direction: column;
 }
 
-.tc-main-downloads {
-  padding: 1.25rem;
-  gap: 1rem;
-  overflow: auto;
-}
-
-.tc-section-title {
-  margin: 0;
-  font-size: 1.5rem;
-}
-
-.tc-section-copy {
-  margin: 0;
-  color: var(--tc-muted);
-  max-width: 40rem;
-  line-height: 1.45;
-  font-size: 1.05rem;
+.tc-main-map {
+  background: #0a1511;
 }
 
 .tc-map-shell {
-  position: relative;
-  flex: 1;
-  min-height: 0;
-  width: 100%;
+  position: absolute;
+  inset: 0;
 }
 
 .tc-map-container {
@@ -130,88 +87,187 @@ button {
   height: 100%;
 }
 
+.tc-map-container .maplibregl-map,
+.tc-map-container .maplibregl-canvas-container,
+.tc-map-container .maplibregl-canvas {
+  background: #0a1511 !important;
+}
+
 .tc-map-badge {
   position: absolute;
-  left: 0.75rem;
-  bottom: 0.75rem;
+  top: calc(var(--tc-pad) + var(--tc-safe-top) + 3.35rem);
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 1;
   margin: 0;
-  max-width: min(92vw, 28rem);
-  padding: 0.45rem 0.65rem;
-  border-radius: 6px;
-  background: rgba(8, 14, 12, 0.88);
+  max-width: min(70vw, 18rem);
+  padding: 0.4rem 0.75rem;
+  border-radius: 999px;
+  background: rgba(6, 12, 10, 0.82);
   border: 1px solid var(--tc-border);
-  color: var(--tc-muted);
-  font-size: 0.8rem;
-  line-height: 1.3;
+  color: var(--tc-text);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: center;
   pointer-events: none;
+  backdrop-filter: blur(10px);
+  box-shadow: var(--tc-shadow);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 160ms ease;
+}
+
+.tc-map-badge[data-visible='true'] {
+  opacity: 1;
+  visibility: visible;
 }
 
 .tc-position-marker {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: #2f80ed;
+  background: #3b8ef0;
   border: 3px solid #fff;
   box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.45);
 }
 
-.tc-hud {
-  position: absolute;
-  top: 0.75rem;
-  left: 0.75rem;
-  z-index: 2;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  max-width: min(92vw, 22rem);
+.tc-destination-marker {
+  width: 22px;
+  height: 22px;
+  margin-left: -11px;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  background: var(--tc-accent);
+  border: 2px solid #1a1205;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
 }
 
-.tc-gps-panel,
-.tc-compass,
-.tc-nav-banner,
-.tc-download {
+.tc-engine-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  align-self: flex-start;
+  max-width: 100%;
+  min-height: 2rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
   background: var(--tc-panel);
-  border: 2px solid var(--tc-border);
-  border-radius: 10px;
-  padding: 0.85rem 1rem;
+  border: 1px solid var(--tc-border);
+  backdrop-filter: blur(14px);
+  box-shadow: var(--tc-shadow);
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1;
 }
 
-.tc-gps-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.tc-gps-label {
-  font-size: 0.75rem;
-  letter-spacing: 0.08em;
+.tc-engine-chip-label {
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--tc-muted);
   font-weight: 700;
 }
 
-.tc-gps-coords {
-  font-size: 1.15rem;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
+.tc-engine-chip-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--tc-text);
 }
 
-.tc-gps-ok {
-  color: var(--tc-ok);
+/* ── Ride HUD ───────────────────────────────────────────── */
+
+.tc-hud {
+  position: absolute;
+  top: calc(var(--tc-pad) + var(--tc-safe-top));
+  left: calc(var(--tc-pad) + var(--tc-safe-left));
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: min(calc(100% - 5.5rem - var(--tc-safe-left) - var(--tc-safe-right)), 17.5rem);
+  pointer-events: none;
+}
+
+.tc-hud > * {
+  pointer-events: auto;
+}
+
+.tc-gps-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  align-self: flex-start;
+  max-width: 100%;
+  min-height: 2rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  background: var(--tc-panel);
+  border: 1px solid var(--tc-border);
+  backdrop-filter: blur(14px);
+  box-shadow: var(--tc-shadow);
+  font-size: 0.82rem;
   font-weight: 600;
+  line-height: 1;
 }
 
-.tc-gps-stale,
-.tc-gps-missing {
-  color: var(--tc-danger);
+.tc-gps-chip-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--tc-muted);
+}
+
+.tc-gps-chip-ok .tc-gps-chip-dot {
+  background: var(--tc-ok);
+  box-shadow: 0 0 0 3px rgba(79, 207, 132, 0.22);
+}
+
+.tc-gps-chip-stale .tc-gps-chip-dot,
+.tc-gps-chip-missing .tc-gps-chip-dot {
+  background: var(--tc-danger);
+  box-shadow: 0 0 0 3px rgba(255, 107, 74, 0.22);
+}
+
+.tc-gps-chip-label {
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--tc-muted);
   font-weight: 700;
 }
+
+.tc-gps-chip-value {
+  font-family: var(--tc-font-mono);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tc-gps-chip-flag {
+  font-size: 0.6rem;
+  letter-spacing: 0.05em;
+  font-weight: 800;
+  color: var(--tc-danger);
+}
+
+/* ── Compass ────────────────────────────────────────────── */
 
 .tc-compass {
-  display: flex;
-  gap: 0.85rem;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.75rem;
   align-items: center;
+  padding: 0.65rem 0.75rem;
+  background: var(--tc-panel);
+  border: 1px solid var(--tc-border);
+  border-radius: var(--tc-radius);
+  backdrop-filter: blur(14px);
+  box-shadow: var(--tc-shadow);
 }
 
 .tc-compass-dial {
@@ -219,155 +275,665 @@ button {
   width: 72px;
   height: 72px;
   border-radius: 50%;
-  border: 3px solid var(--tc-accent);
-  background: #0e1a15;
+  border: 2px solid var(--tc-border-strong);
+  background:
+    radial-gradient(circle at 50% 42%, #1a2c23 0%, #08120e 72%);
   flex-shrink: 0;
+}
+
+.tc-compass-dial[data-unavailable] {
+  opacity: 0.5;
+}
+
+.tc-compass-tick {
+  position: absolute;
+  font-family: var(--tc-font-display);
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: var(--tc-muted);
+  line-height: 1;
+}
+
+.tc-compass-tick-n {
+  top: 5px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--tc-accent);
+  font-size: 0.7rem;
+}
+
+.tc-compass-tick-e {
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.tc-compass-tick-s {
+  bottom: 5px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.tc-compass-tick-w {
+  left: 6px;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 .tc-compass-needle {
   position: absolute;
   left: 50%;
-  top: 10%;
-  width: 4px;
-  height: 40%;
-  margin-left: -2px;
-  background: linear-gradient(var(--tc-danger), var(--tc-text));
-  border-radius: 2px;
-  transform-origin: 50% 100%;
+  top: 50%;
+  width: 8px;
+  height: 62%;
+  margin-left: -4px;
+  margin-top: -31%;
+  transform-origin: 50% 50%;
   transition: transform 120ms linear;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
-.tc-compass-n {
+.tc-compass-needle-tip,
+.tc-compass-needle-tail {
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+}
+
+.tc-compass-needle-tip {
+  border-bottom: 24px solid var(--tc-danger);
+}
+
+.tc-compass-needle-tail {
+  border-top: 20px solid rgba(240, 244, 239, 0.85);
+}
+
+.tc-compass-hub {
   position: absolute;
-  top: 4px;
   left: 50%;
-  transform: translateX(-50%);
-  font-size: 0.7rem;
-  font-weight: 800;
-  color: var(--tc-accent);
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+  border-radius: 50%;
+  background: var(--tc-accent);
+  border: 2px solid var(--tc-panel-solid);
+  z-index: 1;
 }
 
 .tc-compass-meta {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  align-items: flex-start;
+  gap: 0.15rem;
   min-width: 0;
 }
 
 .tc-compass-heading {
-  font-size: 1.6rem;
+  font-family: var(--tc-font-display);
+  font-size: 1.65rem;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1;
 }
 
 .tc-compass-accuracy {
   color: var(--tc-muted);
   text-transform: uppercase;
-  font-size: 0.75rem;
-  letter-spacing: 0.06em;
+  font-size: 0.65rem;
+  letter-spacing: 0.07em;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
 
-.tc-compass-warn,
-.tc-compass-msg {
-  font-size: 0.85rem;
+.tc-compass-warn {
+  font-size: 0.72rem;
   color: var(--tc-accent);
-  line-height: 1.25;
+  font-weight: 600;
 }
+
+/* ── Navigation banner ──────────────────────────────────── */
 
 .tc-nav-banner {
   position: absolute;
-  left: 0.75rem;
-  right: 0.75rem;
-  bottom: 3.5rem;
+  left: calc(var(--tc-pad) + var(--tc-safe-left));
+  right: calc(var(--tc-pad) + var(--tc-safe-right));
+  bottom: calc(var(--tc-pad) + var(--tc-safe-bottom));
   z-index: 2;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 0.85rem;
+  padding: 0.85rem 0.95rem;
+  background: var(--tc-panel);
+  border: 1px solid var(--tc-border);
+  border-radius: var(--tc-radius);
+  backdrop-filter: blur(16px);
+  box-shadow: var(--tc-shadow);
+}
+
+.tc-nav-banner-idle {
+  padding: 0.7rem 0.8rem;
+}
+
+.tc-nav-banner[data-status='navigating'],
+.tc-nav-banner[data-status='rerouting'] {
+  border-color: var(--tc-border-strong);
+}
+
+.tc-nav-banner-main {
+  min-width: 0;
+  flex: 1;
 }
 
 .tc-nav-status {
   display: inline-block;
-  font-size: 0.75rem;
-  letter-spacing: 0.08em;
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
   color: var(--tc-muted);
   font-weight: 700;
 }
 
 .tc-nav-instruction {
-  margin: 0.25rem 0 0;
-  font-size: 1.2rem;
+  margin: 0.2rem 0 0;
+  font-family: var(--tc-font-display);
+  font-size: clamp(1.05rem, 3.2vw, 1.4rem);
   font-weight: 700;
-  line-height: 1.3;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+
+.tc-nav-banner-idle .tc-nav-instruction {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--tc-muted);
+  font-family: var(--tc-font-body);
 }
 
 .tc-nav-offroute {
-  margin: 0.35rem 0 0;
+  margin: 0.3rem 0 0;
   color: var(--tc-danger);
   font-weight: 800;
+  font-size: 0.9rem;
 }
+
+.tc-nav-remaining {
+  margin: 0.25rem 0 0;
+  color: var(--tc-muted);
+  font-size: 0.85rem;
+  font-family: var(--tc-font-mono);
+}
+
+.tc-nav-actions {
+  flex-shrink: 0;
+}
+
+/* ── Buttons ────────────────────────────────────────────── */
 
 .tc-btn {
-  min-height: 52px;
-  min-width: 120px;
-  padding: 0.7rem 1.1rem;
+  min-height: var(--tc-touch);
+  min-width: 7.5rem;
+  padding: 0.65rem 1rem;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--tc-radius-sm);
   background: var(--tc-accent);
   color: #1a1205;
-  font-size: 1.05rem;
-  font-weight: 800;
+  font-family: var(--tc-font-display);
+  font-size: 0.98rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
   cursor: pointer;
+  transition: background 120ms ease, transform 80ms ease;
 }
 
-.tc-btn:active {
+.tc-btn:active:not(:disabled) {
   background: var(--tc-accent-dim);
+  transform: scale(0.98);
+}
+
+.tc-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .tc-btn-secondary {
   background: transparent;
   color: var(--tc-text);
-  border: 2px solid var(--tc-border);
+  border: 1.5px solid var(--tc-border);
+}
+
+.tc-btn-secondary:active {
+  background: var(--tc-accent-soft);
+  border-color: var(--tc-accent);
+}
+
+.tc-btn-ghost {
+  min-height: 2rem;
+  min-width: 0;
+  margin-top: 0.2rem;
+  padding: 0.3rem 0.7rem;
+  border-radius: 8px;
+  background: var(--tc-accent-soft);
+  color: var(--tc-accent);
+  border: 1px solid var(--tc-border-strong);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.tc-btn-ghost:active {
+  background: rgba(240, 160, 32, 0.28);
+}
+
+/* ── Bottom navigation ──────────────────────────────────── */
+
+.tc-bottom-nav {
+  position: relative;
+  z-index: 3;
+  flex-shrink: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.25rem;
+  padding: 0.4rem 0.5rem calc(0.4rem + var(--tc-safe-bottom));
+  padding-left: calc(0.5rem + var(--tc-safe-left));
+  padding-right: calc(0.5rem + var(--tc-safe-right));
+  background: #050c09;
+  border-top: 1px solid var(--tc-border);
+}
+
+.tc-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  min-height: 2.85rem;
+  padding: 0.3rem 0.4rem;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--tc-muted);
+  cursor: pointer;
+}
+
+.tc-nav-item-active {
+  color: var(--tc-accent);
+  background: var(--tc-accent-soft);
+}
+
+.tc-nav-icon {
+  display: flex;
+  line-height: 0;
+}
+
+.tc-nav-label {
+  font-family: var(--tc-font-display);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* ── Downloads screen ───────────────────────────────────── */
+
+.tc-main-downloads {
+  padding: calc(1.15rem + var(--tc-safe-top)) calc(1.1rem + var(--tc-safe-right))
+    1.15rem calc(1.1rem + var(--tc-safe-left));
+  gap: 1rem;
+  overflow: auto;
+  background:
+    linear-gradient(180deg, #12241c 0%, var(--tc-bg) 32%);
+}
+
+.tc-downloads-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.tc-downloads-brand {
+  margin: 0;
+  font-family: var(--tc-font-display);
+  font-size: clamp(1.85rem, 5.5vw, 2.4rem);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--tc-accent);
+  line-height: 1;
+}
+
+.tc-section-title {
+  margin: 0;
+  font-family: var(--tc-font-display);
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.tc-section-copy {
+  margin: 0.15rem 0 0;
+  color: #a8b9ad;
+  max-width: 34rem;
+  line-height: 1.45;
+  font-size: 0.95rem;
+}
+
+.tc-list-heading {
+  margin: 0.25rem 0 0;
+  font-family: var(--tc-font-display);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--tc-muted);
+}
+
+.tc-storage {
+  padding: 0.85rem 0.95rem;
+  border-radius: var(--tc-radius);
+  background: var(--tc-bg-elevated);
+  border: 1px solid var(--tc-border);
+}
+
+.tc-storage-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.tc-storage-label {
+  color: var(--tc-muted);
+  font-weight: 600;
+}
+
+.tc-storage-value {
+  font-family: var(--tc-font-mono);
+  font-size: 0.8rem;
+  color: var(--tc-muted);
+}
+
+.tc-storage-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: #1a2820;
+  overflow: hidden;
+}
+
+.tc-storage-fill {
+  height: 100%;
+  width: 0;
+  background: var(--tc-accent);
+}
+
+.tc-region-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.tc-region {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+  border-radius: var(--tc-radius);
+  background: var(--tc-bg-elevated);
+  border: 1px solid var(--tc-border);
+}
+
+.tc-region-name {
+  margin: 0;
+  font-family: var(--tc-font-display);
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.tc-region-meta {
+  margin: 0.2rem 0 0;
+  color: var(--tc-muted);
+  font-size: 0.85rem;
+}
+
+.tc-region-badge {
+  flex-shrink: 0;
+  padding: 0.3rem 0.55rem;
+  border-radius: 8px;
+  background: rgba(255, 107, 74, 0.12);
+  color: var(--tc-danger);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.tc-region-badge-ok {
+  background: rgba(79, 207, 132, 0.14);
+  color: var(--tc-ok);
+}
+
+.tc-download {
+  background: var(--tc-bg-elevated);
+  border: 1px solid var(--tc-border);
+  border-radius: var(--tc-radius);
+  padding: 0.9rem 1rem;
 }
 
 .tc-download-header {
   display: flex;
   justify-content: space-between;
-  font-size: 1.1rem;
+  align-items: baseline;
+  gap: 1rem;
+  font-size: 0.98rem;
   margin-bottom: 0.5rem;
 }
 
+.tc-download-pct {
+  font-family: var(--tc-font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--tc-accent);
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
 .tc-download-track {
-  height: 14px;
-  border-radius: 7px;
-  background: #1c2b24;
+  height: 10px;
+  border-radius: 5px;
+  background: #1a2820;
   overflow: hidden;
 }
 
 .tc-download-fill {
   height: 100%;
-  background: var(--tc-accent);
+  background: linear-gradient(90deg, var(--tc-accent-dim), var(--tc-accent));
   transition: width 200ms ease;
 }
 
 .tc-download-msg {
-  margin: 0.6rem 0 0;
+  margin: 0.55rem 0 0;
   color: var(--tc-muted);
-  line-height: 1.35;
+  line-height: 1.4;
+  font-size: 0.88rem;
+}
+
+/* ── MapLibre chrome ────────────────────────────────────── */
+
+.tc-locate-btn {
+  position: absolute;
+  top: calc(var(--tc-pad) + var(--tc-safe-top) + 9.25rem);
+  right: calc(var(--tc-pad) + var(--tc-safe-right));
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--tc-border);
+  border-radius: 12px;
+  background: var(--tc-panel);
+  color: var(--tc-text);
+  box-shadow: var(--tc-shadow);
+  backdrop-filter: blur(12px);
+  cursor: pointer;
+}
+
+.tc-locate-btn:active:not(:disabled) {
+  color: var(--tc-accent);
+  border-color: var(--tc-border-strong);
+  background: var(--tc-accent-soft);
+}
+
+.tc-locate-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.maplibregl-ctrl-top-right {
+  top: calc(var(--tc-pad) + var(--tc-safe-top)) !important;
+  right: calc(var(--tc-pad) + var(--tc-safe-right)) !important;
+}
+
+.maplibregl-ctrl-bottom-right,
+.maplibregl-ctrl-bottom-left {
+  margin-bottom: 0.35rem !important;
+}
+
+.maplibregl-ctrl-attrib {
+  background: rgba(6, 12, 10, 0.7) !important;
+  color: var(--tc-muted) !important;
+  font-size: 0.65rem !important;
+  border-radius: 6px !important;
+  margin: 0 0.4rem 0.35rem !important;
+}
+
+.maplibregl-ctrl-attrib a {
+  color: var(--tc-muted) !important;
+}
+
+.maplibregl-ctrl-logo {
+  margin: 0 0.4rem 0.35rem !important;
+  opacity: 0.7;
+}
+
+.maplibregl-ctrl-group {
+  background: var(--tc-panel) !important;
+  border: 1px solid var(--tc-border) !important;
+  border-radius: 12px !important;
+  overflow: hidden;
+  box-shadow: var(--tc-shadow);
+  backdrop-filter: blur(12px);
 }
 
 .maplibregl-ctrl-group button {
-  width: 36px !important;
-  height: 36px !important;
+  width: 44px !important;
+  height: 44px !important;
+  background-color: transparent !important;
 }
 
-@media (max-width: 640px) {
+.maplibregl-ctrl-group button:hover {
+  background-color: var(--tc-accent-soft) !important;
+}
+
+.maplibregl-ctrl-group button + button {
+  border-top: 1px solid var(--tc-border) !important;
+}
+
+.maplibregl-ctrl button .maplibregl-ctrl-icon {
+  background-size: 20px 20px !important;
+  /* MapLibre icons are dark; invert for our dark chrome */
+  filter: invert(1) brightness(1.15);
+}
+
+/* ── Narrow phones ──────────────────────────────────────── */
+
+@media (max-width: 420px) {
   .tc-nav-banner {
     flex-direction: column;
     align-items: stretch;
-    bottom: 4.25rem;
+    gap: 0.65rem;
+  }
+
+  .tc-nav-actions .tc-btn {
+    width: 100%;
+  }
+
+  .tc-hud {
+    width: min(calc(100% - 4.75rem - var(--tc-safe-left) - var(--tc-safe-right)), 15.5rem);
+  }
+}
+
+/* ── Landscape / motorcycle mount ───────────────────────── */
+
+@media (orientation: landscape) and (max-height: 520px) {
+  .tc-hud {
+    flex-direction: row;
+    align-items: flex-start;
+    width: auto;
+    max-width: min(62vw, 26rem);
+  }
+
+  .tc-compass {
+    padding: 0.45rem 0.6rem;
+  }
+
+  .tc-compass-dial {
+    width: 56px;
+    height: 56px;
+  }
+
+  .tc-compass-heading {
+    font-size: 1.25rem;
+  }
+
+  .tc-nav-banner {
+    bottom: 0.5rem;
+    padding: 0.55rem 0.7rem;
+    max-width: min(36rem, calc(100% - 1.5rem));
+  }
+
+  .tc-nav-instruction {
+    font-size: 1rem;
+  }
+
+  .tc-bottom-nav {
+    padding-top: 0.25rem;
+    padding-bottom: calc(0.25rem + var(--tc-safe-bottom));
+  }
+
+  .tc-nav-item {
+    flex-direction: row;
+    gap: 0.4rem;
+    min-height: 2.4rem;
   }
 
   .tc-btn {
-    width: 100%;
+    min-height: 2.5rem;
+    min-width: 6.5rem;
+  }
+}
+
+@media (min-width: 800px) {
+  .tc-hud {
+    top: 1rem;
+    left: 1rem;
+  }
+
+  .tc-nav-banner {
+    left: 1rem;
+    right: auto;
+    bottom: 1rem;
+    width: min(34rem, calc(100% - 7rem));
+  }
+
+  .tc-nav-banner-idle {
+    width: min(28rem, calc(100% - 7rem));
   }
 }
