@@ -1,0 +1,8 @@
+{
+  "id": "trailcompass-online-style",
+  "styleUrl": "https://tiles.openfreemap.org/styles/liberty",
+  "provider": "OpenFreeMap Liberty",
+  "requiresNetwork": true,
+  "attribution": "© OpenFreeMap © OpenMapTiles Data from OpenStreetMap",
+  "comment": "Online basemap. Offline PMTiles packages are a later step and are not this style."
+}
