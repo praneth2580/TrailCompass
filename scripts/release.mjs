@@ -8,7 +8,7 @@
  *   node scripts/release.mjs minor --notes "Offline map download"
  *   node scripts/release.mjs major --draft
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { root, runGradle } from './android-env.mjs';
@@ -27,12 +27,39 @@ if (notesFlag >= 0 && !notes) {
   process.exit(1);
 }
 
-function run(cmd, args) {
-  execFileSync(cmd, args, { stdio: 'inherit', cwd: root });
+function run(cmd, args, env = process.env) {
+  execFileSync(cmd, args, { stdio: 'inherit', cwd: root, env });
+}
+
+function originToken() {
+  let url = '';
+  try {
+    url = git(['remote', 'get-url', 'origin']);
+  } catch {
+    return '';
+  }
+  const match = url.match(/^https:\/\/([^@]+)@github\.com\//);
+  return match ? decodeURIComponent(match[1]) : '';
+}
+
+function ghEnv() {
+  if (process.env.GH_TOKEN || process.env.GITHUB_TOKEN) return process.env;
+  const token = originToken();
+  if (!token) return process.env;
+  return { ...process.env, GH_TOKEN: token };
 }
 
 function git(args) {
   return execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+}
+
+function isIgnored(file) {
+  try {
+    execFileSync('git', ['check-ignore', '-q', file], { cwd: root, stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 const pkgPath = path.join(root, 'package.json');
@@ -55,10 +82,20 @@ try {
   process.exit(1);
 }
 
+const releaseEnv = ghEnv();
 try {
   execFileSync('gh', ['--version'], { stdio: 'ignore' });
 } catch {
   console.error('GitHub CLI (gh) is not installed or not on PATH.');
+  process.exit(1);
+}
+const ghProbe = spawnSync('gh', ['release', 'list', '--limit', '1'], {
+  cwd: root,
+  env: releaseEnv,
+  encoding: 'utf8',
+});
+if (ghProbe.status !== 0) {
+  console.error('GitHub CLI cannot access this repo. Set GH_TOKEN, or sign in with gh auth login.');
   process.exit(1);
 }
 
@@ -100,10 +137,11 @@ if (!existsSync(apkPath)) {
 
 const tag = `v${next}`;
 const message = notes || `Release ${tag}`;
-const versioned = ['package.json', 'android/app/build.gradle', 'android/app/src/main/res/xml/config.xml'];
-if (existsSync(lockPath)) versioned.push('package-lock.json');
+const versioned = ['package.json', 'android/app/build.gradle', 'android/app/src/main/res/xml/config.xml', lockPath]
+  .map((file) => path.relative(root, path.resolve(root, file)))
+  .filter((file) => existsSync(path.join(root, file)) && !isIgnored(file));
 
-run('git', ['add', ...versioned]);
+run('git', ['add', '--', ...versioned]);
 run('git', ['commit', '-m', message]);
 run('git', ['tag', tag]);
 run('git', ['push', '-u', 'origin', 'HEAD']);
@@ -116,10 +154,11 @@ const releaseArgs = [
   '--notes', message,
 ];
 if (draft) releaseArgs.push('--draft');
-run('gh', releaseArgs);
+run('gh', releaseArgs, releaseEnv);
 
 const url = execFileSync('gh', ['release', 'view', tag, '--json', 'url', '--jq', '.url'], {
   cwd: root,
+  env: releaseEnv,
   encoding: 'utf8',
 }).trim();
 console.log(`Published ${tag}`);
