@@ -142,12 +142,28 @@ export default function App() {
 
   const resolveStart = (): Coordinate => {
     if (fix) return [fix.longitude, fix.latitude];
+    const last = locationService.getLastFix();
+    if (last) return [last.longitude, last.latitude];
     const center = mapService.getCenter();
     if (center) return center;
-    if (nav.destination) {
-      return [nav.destination[0] - 0.01, nav.destination[1] - 0.01];
+    throw new Error(
+      'Need a GPS fix to start routing — open Map and wait for GPS, then try again',
+    );
+  };
+
+  const resolveStartForPreview = async (): Promise<Coordinate> => {
+    try {
+      const gps = await locationService.ensureFix(8_000);
+      return [gps.longitude, gps.latitude];
+    } catch (e) {
+      try {
+        return resolveStart();
+      } catch {
+        throw e instanceof Error
+          ? e
+          : new Error('Need GPS to preview from Plan');
+      }
     }
-    return [0, 0];
   };
 
   const syncItineraryMarkers = () => {
@@ -193,21 +209,39 @@ export default function App() {
     if (!end) return;
     const waypoints = tripPlanner.getWaypoints();
     syncItineraryMarkers();
-    void navigationService.planRoute(resolveStart(), end, waypoints);
+    try {
+      void navigationService.planRoute(resolveStart(), end, waypoints);
+    } catch (e) {
+      setToast({
+        message: e instanceof Error ? e.message : 'Could not plan route',
+        tone: 'error',
+      });
+    }
   };
 
   const handlePreviewFromPlan = () => {
     const end = tripPlanner.getDestinationCoordinate();
-    if (!end) return;
+    if (!end) {
+      setToast({
+        message: 'Set a destination on Plan first',
+        tone: 'error',
+      });
+      return;
+    }
     const waypoints = tripPlanner.getWaypoints();
     setPlanBusy(true);
     syncItineraryMarkers();
+    navigationService.setDestination(end);
+    navigationService.setWaypoints(waypoints);
     setScreen('map');
-    setFollowGps(false);
-    setToast({ message: 'Planning trip…', tone: 'loading' });
-    void navigationService
-      .planRoute(resolveStart(), end, waypoints)
-      .then(() => {
+    setFollowGps(true);
+    setToast({ message: 'Getting GPS & planning…', tone: 'loading' });
+
+    void (async () => {
+      try {
+        const start = await resolveStartForPreview();
+        mapService.centerOn(start);
+        await navigationService.planRoute(start, end, waypoints);
         const state = navigationService.getState();
         if (state.status === 'error') {
           setToast({
@@ -224,8 +258,16 @@ export default function App() {
               : 'Route ready — tap Start',
           tone: 'success',
         });
-      })
-      .finally(() => setPlanBusy(false));
+      } catch (e) {
+        setToast({
+          message: e instanceof Error ? e.message : 'Could not plan trip',
+          tone: 'error',
+        });
+        setScreen('plan');
+      } finally {
+        setPlanBusy(false);
+      }
+    })();
   };
 
   const handleRequestMapPick = (
@@ -274,11 +316,18 @@ export default function App() {
         nav.status === 'error' ||
         nav.status === 'idle')
     ) {
-      void navigationService.planRoute(
-        resolveStart(),
-        end,
-        tripPlanner.getWaypoints(),
-      );
+      try {
+        void navigationService.planRoute(
+          resolveStart(),
+          end,
+          tripPlanner.getWaypoints(),
+        );
+      } catch (e) {
+        setToast({
+          message: e instanceof Error ? e.message : 'Could not replan',
+          tone: 'error',
+        });
+      }
     }
   };
 

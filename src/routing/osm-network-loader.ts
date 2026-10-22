@@ -3,6 +3,7 @@ import type { NetworkFeatureCollection } from './graph-engine';
 import { haversineMeters } from './geo';
 import { interpolateGeodesic } from './route-chunking';
 import type { RoutingProgressListener } from './routing-progress';
+import { roadPackService } from '../services/road-pack.service';
 
 const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
@@ -71,6 +72,25 @@ export async function loadOsmNetworkForRoute(
   }
 
   onProgress?.({
+    phase: 'checking-cache',
+    label: 'Checking saved road packs…',
+    percent: null,
+  });
+  const diskPack = await roadPackService.findCoveringPack(points);
+  if (diskPack) {
+    onProgress?.({
+      phase: 'checking-cache',
+      label: `Using saved pack · ${diskPack.meta.label}`,
+      percent: 100,
+    });
+    memoryCache.set(cacheKey, {
+      collection: diskPack.collection,
+      loadedAt: Date.now(),
+    });
+    return diskPack.collection;
+  }
+
+  onProgress?.({
     phase: 'downloading-roads',
     label: useCorridor
       ? 'Downloading road corridor…'
@@ -98,6 +118,10 @@ export async function loadOsmNetworkForRoute(
     const oldest = memoryCache.keys().next().value;
     if (oldest) memoryCache.delete(oldest);
   }
+
+  void roadPackService.saveFromCollection(collection, { cacheKey }).catch(() => {
+    // Persistence is best-effort; routing still works.
+  });
 
   return collection;
 }

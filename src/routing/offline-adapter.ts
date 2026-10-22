@@ -179,7 +179,7 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
         return [merged];
       }
 
-      await this.ensureRoadGraph(start, end);
+      await this.ensureRoadGraph(start, end, { requireCoverage: false });
 
       this.emitProgress({
         phase: 'calculating',
@@ -187,10 +187,15 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
         percent: null,
       });
 
-      const routes = offlineGraphEngine.calculateRoutes(start, end, {
-        profile,
-        alternatives,
-      });
+      const snapped = this.snapRoutingEndpoints(start, end);
+      const routes = offlineGraphEngine.calculateRoutes(
+        snapped.start,
+        snapped.end,
+        {
+          profile,
+          alternatives,
+        },
+      );
       this.emitProgress({
         phase: 'done',
         label:
@@ -246,20 +251,11 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
         requireCoverage: !stop.synthetic,
       });
 
-      let target = stop.coordinate;
-      if (stop.synthetic) {
-        const snapped = offlineGraphEngine.nearestRoadCoordinate(target, 12_000);
-        if (!snapped) {
-          throw new Error(
-            `Could not find roads near via point ${legIndex} of ${legCount}`,
-          );
-        }
-        target = snapped;
-      } else if (!offlineGraphEngine.coversPoints(cursor, target)) {
-        throw new Error(
-          `Could not snap onto roads for leg ${legIndex} of ${legCount} — try a pin closer to a street`,
-        );
-      }
+      const snapped = this.snapRoutingEndpoints(
+        cursor,
+        stop.coordinate,
+        stop.synthetic ? 12_000 : 2_500,
+      );
 
       this.emitProgress({
         phase: 'calculating',
@@ -271,9 +267,13 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
       });
 
       legs.push(
-        offlineGraphEngine.calculateRoute(cursor, target, { profile }),
+        offlineGraphEngine.calculateRoute(
+          snapped.start,
+          snapped.end,
+          { profile },
+        ),
       );
-      cursor = target;
+      cursor = snapped.end;
     }
 
     const merged = mergeRoutes(legs);
@@ -284,13 +284,34 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
     return merged;
   }
 
+  /**
+   * Pull start/end onto the loaded graph. Search pins and GPS can sit
+   * slightly off the carriageway — allow up to `maxMeters`.
+   */
+  private snapRoutingEndpoints(
+    start: Coordinate,
+    end: Coordinate,
+    maxMeters = 2_500,
+  ): { start: Coordinate; end: Coordinate } {
+    const snappedStart =
+      offlineGraphEngine.nearestRoadCoordinate(start, maxMeters) ?? null;
+    const snappedEnd =
+      offlineGraphEngine.nearestRoadCoordinate(end, maxMeters) ?? null;
+    if (!snappedStart || !snappedEnd) {
+      throw new Error(
+        'Could not snap onto downloaded roads — try a pin closer to a street, or pick the place on the map',
+      );
+    }
+    return { start: snappedStart, end: snappedEnd };
+  }
+
   private async ensureRoadGraph(
     start: Coordinate,
     end: Coordinate,
     options: {
       progressLabel?: string;
       waypoints?: Coordinate[];
-      /** When false, allow end to be snapped later (synthetic vias). */
+      /** When false, coverage is checked via snapRoutingEndpoints later. */
       requireCoverage?: boolean;
     } = {},
   ): Promise<void> {
@@ -299,7 +320,7 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
     if (offlineGraphEngine.coversPoints(start, end)) {
       this.emitProgress({
         phase: 'checking-cache',
-        label: 'Roads already loaded',
+        label: 'Using loaded roads',
         percent: 100,
       });
       return;
@@ -334,9 +355,14 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
     });
 
     if (requireCoverage && !offlineGraphEngine.coversPoints(start, end)) {
-      throw new Error(
-        'Could not snap onto downloaded roads — try a pin closer to a street',
-      );
+      const soft =
+        offlineGraphEngine.nearestRoadCoordinate(start, 2_500) &&
+        offlineGraphEngine.nearestRoadCoordinate(end, 2_500);
+      if (!soft) {
+        throw new Error(
+          'Could not snap onto downloaded roads — try a pin closer to a street, or pick the place on the map',
+        );
+      }
     }
   }
 

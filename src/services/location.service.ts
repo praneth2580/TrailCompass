@@ -59,6 +59,51 @@ export class LocationService {
     return this.permissionDenied;
   }
 
+  /**
+   * Ensure watching is on and return a fix (fresh or recent).
+   * Rejects if permission denied or timeout with no fix.
+   */
+  async ensureFix(timeoutMs = 8_000): Promise<GpsFix> {
+    await this.startWatching();
+    if (this.lastFix && !isFixStale(this.lastFix)) {
+      return this.lastFix;
+    }
+    if (this.lastFix && Date.now() - this.lastFix.timestampMs < 60_000) {
+      return this.lastFix;
+    }
+
+    return new Promise<GpsFix>((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        unsub();
+        if (this.lastFix) {
+          resolve(this.lastFix);
+          return;
+        }
+        reject(
+          new Error(
+            this.permissionDenied
+              ? 'Location permission denied — enable GPS to preview from Plan'
+              : 'Waiting for GPS — open Map briefly or enable location, then try again',
+          ),
+        );
+      }, timeoutMs);
+
+      const unsub = this.subscribe((fix, error) => {
+        if (fix) {
+          window.clearTimeout(timer);
+          unsub();
+          resolve(fix);
+          return;
+        }
+        if (error && this.permissionDenied) {
+          window.clearTimeout(timer);
+          unsub();
+          reject(new Error(error));
+        }
+      });
+    });
+  }
+
   subscribe(listener: LocationListener): () => void {
     this.listeners.add(listener);
     if (this.lastFix) listener(this.lastFix);
