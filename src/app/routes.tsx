@@ -12,7 +12,7 @@ export interface AppRoute {
 
 export const APP_ROUTES: AppRoute[] = [
   { id: 'map', label: 'Map', path: '/' },
-  { id: 'downloads', label: 'Downloads', path: '/downloads' },
+  { id: 'downloads', label: 'Library', path: '/downloads' },
 ];
 
 export function resolveScreen(path: string): AppScreen {

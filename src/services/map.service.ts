@@ -28,6 +28,8 @@ export const ONLINE_MAP_STYLE_NOTE =
 
 /** Zoom applied on the first GPS fix so the world view becomes a street view. */
 const INITIAL_FOLLOW_ZOOM = 15;
+/** Locked camera zoom while actively navigating and following the rider. */
+export const NAVIGATION_FOLLOW_ZOOM = 16.5;
 
 export interface MapDataStatus {
   ok: boolean;
@@ -36,7 +38,11 @@ export interface MapDataStatus {
 
 export interface MapAdapter {
   initialize(container: HTMLElement): MapLibreMap;
-  showPosition(coordinate: Coordinate, headingDegrees?: number | null): void;
+  showPosition(
+    coordinate: Coordinate,
+    headingDegrees?: number | null,
+    options?: { follow?: boolean; lockZoom?: number },
+  ): void;
   fitRoute(coordinates: Coordinate[]): void;
   drawRoute(coordinates: Coordinate[], routeIndex?: number): void;
   clearRoute(): void;
@@ -57,15 +63,28 @@ const ALT_HIT_LAYER = 'trailcompass-route-alts-hit';
 
 const ALT_COLORS = ['#5b8def', '#9b7bff', '#3dbea5'];
 
+/** Navigation chevron; tip points toward heading (0° = north). */
+const POSITION_ARROW_HTML = `
+<span class="tc-position-arrow-spin">
+  <svg class="tc-position-arrow" viewBox="0 0 48 48" width="36" height="36" aria-hidden="true">
+    <path d="M24 4 L40 40 L24 32 L8 40 Z" fill="#3b8ef0" stroke="#fff" stroke-width="3" stroke-linejoin="round"/>
+  </svg>
+</span>
+`;
+
 export class MapLibreAdapter implements MapAdapter {
   private map: MapLibreMap | null = null;
   private positionMarker: Marker | null = null;
+  private positionEl: HTMLDivElement | null = null;
+  private positionMode: 'dot' | 'arrow' = 'dot';
   private destinationMarker: Marker | null = null;
   private framedToPosition = false;
   private styleLoaded = false;
   private clickListeners = new Set<(coordinate: Coordinate) => void>();
   private routePickListeners = new Set<(index: number) => void>();
+  private cameraBreakListeners = new Set<() => void>();
   private statusListeners = new Set<(status: MapDataStatus) => void>();
+  private followCamera = true;
   private status: MapDataStatus = {
     ok: false,
     message: 'Loading online map…',
@@ -145,6 +164,16 @@ export class MapLibreAdapter implements MapAdapter {
       map.getCanvas().style.cursor = '';
     });
 
+    // Break GPS camera follow when the user pans/zooms/rotates the map.
+    const onUserCameraGesture = (event: { originalEvent?: Event }) => {
+      if (!event.originalEvent) return;
+      this.breakCameraFollow();
+    };
+    map.on('dragstart', onUserCameraGesture);
+    map.on('zoomstart', onUserCameraGesture);
+    map.on('rotatestart', onUserCameraGesture);
+    map.on('pitchstart', onUserCameraGesture);
+
     this.map = map;
     return map;
   }
@@ -157,6 +186,22 @@ export class MapLibreAdapter implements MapAdapter {
   subscribeRoutePick(listener: (index: number) => void): () => void {
     this.routePickListeners.add(listener);
     return () => this.routePickListeners.delete(listener);
+  }
+
+  /** Fired when the user moves the camera (so UI can turn off follow mode). */
+  subscribeCameraBreak(listener: () => void): () => void {
+    this.cameraBreakListeners.add(listener);
+    return () => this.cameraBreakListeners.delete(listener);
+  }
+
+  setFollowCamera(follow: boolean): void {
+    this.followCamera = follow;
+  }
+
+  private breakCameraFollow(): void {
+    if (!this.followCamera) return;
+    this.followCamera = false;
+    for (const listener of this.cameraBreakListeners) listener();
   }
 
   setDestination(coordinate: Coordinate | null): void {
@@ -204,29 +249,38 @@ export class MapLibreAdapter implements MapAdapter {
     return [c.lng, c.lat];
   }
 
-  showPosition(coordinate: Coordinate, _headingDegrees?: number | null): void {
+  /** Dot for idle map, arrow for active navigation. */
+  setPositionMode(mode: 'dot' | 'arrow'): void {
+    if (this.positionMode === mode) return;
+    this.positionMode = mode;
+    this.applyPositionMarkerChrome(null);
+  }
+
+  /**
+   * Update the rider marker. Camera only recenters while follow is enabled
+   * (or on the very first GPS fix so the map isn't stuck at world view).
+   */
+  showPosition(
+    coordinate: Coordinate,
+    headingDegrees?: number | null,
+    options?: { follow?: boolean; lockZoom?: number },
+  ): void {
     if (!this.map) return;
     const lngLat: [number, number] = [coordinate[0], coordinate[1]];
+    this.ensurePositionMarker(lngLat);
+    this.applyPositionMarkerChrome(headingDegrees);
 
-    if (!this.positionMarker) {
-      const el = document.createElement('div');
-      el.className = 'tc-position-marker';
-      el.setAttribute('aria-label', 'Current GPS position');
-      this.positionMarker = new Marker({ element: el })
-        .setLngLat(lngLat)
-        .addTo(this.map);
-    } else {
-      this.positionMarker.setLngLat(lngLat);
-    }
+    const follow = options?.follow ?? this.followCamera;
+    const firstFix = !this.framedToPosition;
+    if (!follow && !firstFix) return;
 
-    // Keep following the fix. The first fix also zooms in from the world view.
-    // Later fixes only recenter, so a manual zoom stays put.
-    const frameZoom = !this.framedToPosition;
     this.framedToPosition = true;
+    const zoom =
+      options?.lockZoom ?? (firstFix ? INITIAL_FOLLOW_ZOOM : undefined);
     this.map.easeTo({
       center: lngLat,
-      duration: 400,
-      ...(frameZoom ? { zoom: INITIAL_FOLLOW_ZOOM } : {}),
+      duration: firstFix ? 400 : 220,
+      ...(zoom != null ? { zoom } : {}),
     });
   }
 
@@ -234,24 +288,67 @@ export class MapLibreAdapter implements MapAdapter {
   centerOn(coordinate: Coordinate, zoom = INITIAL_FOLLOW_ZOOM): void {
     if (!this.map) return;
     const lngLat: [number, number] = [coordinate[0], coordinate[1]];
+    this.followCamera = true;
     this.framedToPosition = true;
-
-    if (!this.positionMarker) {
-      const el = document.createElement('div');
-      el.className = 'tc-position-marker';
-      el.setAttribute('aria-label', 'Current GPS position');
-      this.positionMarker = new Marker({ element: el })
-        .setLngLat(lngLat)
-        .addTo(this.map);
-    } else {
-      this.positionMarker.setLngLat(lngLat);
-    }
+    this.ensurePositionMarker(lngLat);
+    this.applyPositionMarkerChrome(null);
 
     this.map.easeTo({
       center: lngLat,
       zoom,
       duration: 550,
     });
+  }
+
+  /** Resume navigation follow at the locked street zoom. */
+  resumeNavigationFollow(
+    coordinate: Coordinate,
+    headingDegrees?: number | null,
+  ): void {
+    this.followCamera = true;
+    this.showPosition(coordinate, headingDegrees, {
+      follow: true,
+      lockZoom: NAVIGATION_FOLLOW_ZOOM,
+    });
+  }
+
+  private ensurePositionMarker(lngLat: [number, number]): void {
+    if (!this.map) return;
+    if (!this.positionMarker || !this.positionEl) {
+      const el = document.createElement('div');
+      el.className = 'tc-position-marker';
+      el.setAttribute('aria-label', 'Current GPS position');
+      this.positionEl = el;
+      this.positionMarker = new Marker({ element: el })
+        .setLngLat(lngLat)
+        .addTo(this.map);
+      this.applyPositionMarkerChrome(null);
+    } else {
+      this.positionMarker.setLngLat(lngLat);
+    }
+  }
+
+  private applyPositionMarkerChrome(
+    headingDegrees: number | null | undefined,
+  ): void {
+    const el = this.positionEl;
+    if (!el) return;
+
+    if (this.positionMode === 'arrow') {
+      el.className = 'tc-position-marker tc-position-marker-arrow';
+      if (!el.querySelector('.tc-position-arrow-spin')) {
+        el.innerHTML = POSITION_ARROW_HTML;
+      }
+      const spin = el.querySelector('.tc-position-arrow-spin') as HTMLElement | null;
+      const heading =
+        headingDegrees != null && Number.isFinite(headingDegrees)
+          ? headingDegrees
+          : 0;
+      if (spin) spin.style.transform = `rotate(${heading}deg)`;
+    } else {
+      el.className = 'tc-position-marker';
+      el.innerHTML = '';
+    }
   }
 
   fitRoute(coordinates: Coordinate[]): void {
@@ -433,6 +530,8 @@ export class MapLibreAdapter implements MapAdapter {
   dispose(): void {
     this.positionMarker?.remove();
     this.positionMarker = null;
+    this.positionEl = null;
+    this.positionMode = 'dot';
     this.destinationMarker?.remove();
     this.destinationMarker = null;
     this.clickListeners.clear();

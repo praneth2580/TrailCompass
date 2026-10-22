@@ -16,6 +16,7 @@ interface RouteOptionsPanelProps {
   visible: boolean;
   onProfileChange: (profile: RoutingProfileId) => void;
   onSelectAlternative: (index: number) => void;
+  onStartNavigation: (index: number) => void;
   onToggleShowAll: (showAll: boolean) => void;
 }
 
@@ -27,21 +28,24 @@ export function RouteOptionsPanel({
   visible,
   onProfileChange,
   onSelectAlternative,
+  onStartNavigation,
   onToggleShowAll,
 }: RouteOptionsPanelProps) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const [routesSeen, setRoutesSeen] = useState(0);
   const hasRoutes = alternatives.length > 0;
 
-  // Re-open the sheet when a new set of routes arrives so picking is obvious.
+  // Open when new alternatives arrive so the rider can pick one.
   if (hasRoutes && alternatives.length !== routesSeen) {
     setRoutesSeen(alternatives.length);
-    if (!expanded) setExpanded(true);
+    setExpanded(true);
   } else if (!hasRoutes && routesSeen !== 0) {
     setRoutesSeen(0);
   }
 
   if (!visible) return null;
+
+  const sheetExpanded = expanded;
 
   const activeProfile = getProfile(profile);
   const selected = alternatives[selectedIndex];
@@ -49,7 +53,7 @@ export function RouteOptionsPanel({
   return (
     <section
       className={
-        expanded
+        sheetExpanded
           ? 'tc-route-sheet'
           : 'tc-route-sheet tc-route-sheet-collapsed'
       }
@@ -59,7 +63,7 @@ export function RouteOptionsPanel({
         type="button"
         className="tc-route-sheet-handle"
         onClick={() => setExpanded((v) => !v)}
-        aria-expanded={expanded}
+        aria-expanded={sheetExpanded}
       >
         <span className="tc-route-sheet-grip" aria-hidden />
         <span className="tc-route-sheet-summary">
@@ -72,20 +76,17 @@ export function RouteOptionsPanel({
             <span>
               {formatKm(selected.distanceMeters)} ·{' '}
               {formatEta(selected.durationSeconds)}
-              {alternatives.length > 1
-                ? ` · tap a card or map line to switch`
-                : ''}
             </span>
           ) : (
-            <span>Choose preference, then plan</span>
+            <span>Route type · then Plan</span>
           )}
         </span>
         <span className="tc-route-sheet-chevron" aria-hidden>
-          {expanded ? '▾' : '▴'}
+          {sheetExpanded ? '▾' : '▴'}
         </span>
       </button>
 
-      {expanded ? (
+      {sheetExpanded ? (
         <div className="tc-route-sheet-body">
           <div className="tc-route-section">
             <p className="tc-route-section-label">Route type</p>
@@ -162,9 +163,8 @@ export function RouteOptionsPanel({
                   const active = index === selectedIndex;
                   const swatch = ROUTE_SWATCHES[index % ROUTE_SWATCHES.length]!;
                   return (
-                    <button
+                    <div
                       key={route.id ?? index}
-                      type="button"
                       role="option"
                       aria-selected={active}
                       className={
@@ -172,36 +172,43 @@ export function RouteOptionsPanel({
                           ? 'tc-route-card tc-route-card-active'
                           : 'tc-route-card'
                       }
-                      onClick={() => onSelectAlternative(index)}
                     >
-                      <span
-                        className="tc-route-card-swatch"
-                        style={{ background: swatch }}
-                        aria-hidden
-                      />
-                      <span className="tc-route-card-body">
-                        <span className="tc-route-card-title">
-                          {routeLabel(route, index)}
-                          {index === 0 ? (
-                            <span className="tc-route-card-badge">Best</span>
-                          ) : null}
+                      <button
+                        type="button"
+                        className="tc-route-card-pick"
+                        onClick={() => onSelectAlternative(index)}
+                      >
+                        <span
+                          className="tc-route-card-swatch"
+                          style={{ background: swatch }}
+                          aria-hidden
+                        />
+                        <span className="tc-route-card-body">
+                          <span className="tc-route-card-title">
+                            {routeLabel(route, index)}
+                            {index === 0 ? (
+                              <span className="tc-route-card-badge">Best</span>
+                            ) : null}
+                          </span>
+                          <span className="tc-route-card-meta">
+                            <span>{formatKm(route.distanceMeters)}</span>
+                            <span aria-hidden>·</span>
+                            <span>{formatEta(route.durationSeconds)}</span>
+                          </span>
                         </span>
-                        <span className="tc-route-card-meta">
-                          <span>{formatKm(route.distanceMeters)}</span>
-                          <span aria-hidden>·</span>
-                          <span>{formatEta(route.durationSeconds)}</span>
-                        </span>
-                      </span>
-                      <span
+                      </button>
+                      <button
+                        type="button"
                         className={
                           active
                             ? 'tc-route-card-action tc-route-card-action-on'
                             : 'tc-route-card-action'
                         }
+                        onClick={() => onStartNavigation(index)}
                       >
-                        {active ? 'Taking' : 'Take'}
-                      </span>
-                    </button>
+                        Go
+                      </button>
+                    </div>
                   );
                 })}
               </div>
@@ -212,9 +219,9 @@ export function RouteOptionsPanel({
             </p>
           )}
 
-          {alternatives.length > 1 ? (
+          {alternatives.length > 0 ? (
             <p className="tc-route-footnote">
-              Tap a card, or a colored line on the map, to choose your route.
+              Select a route, then tap Go or Start to enter navigation.
             </p>
           ) : null}
         </div>

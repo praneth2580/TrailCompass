@@ -15,6 +15,13 @@ import { mapService } from './map.service';
 import { offlineRoutingAdapter } from '../routing/offline-adapter';
 import type { RoutingProgress } from '../routing/routing-progress';
 import type { RoutingProfileId } from '../routing/routing-profiles';
+import {
+  calculatedToSavedRoute,
+  savedToCalculatedRoute,
+  type SavedRoute,
+} from '../types/route';
+import { suggestRouteName } from '../routing/route-naming';
+import { routeLibrary } from './route-library.service';
 
 export type NavigationListener = (state: NavigationState) => void;
 
@@ -111,12 +118,109 @@ export class NavigationService {
     const next = selectNextInstruction(route.instructions, 0);
     this.setState({
       ...this.state,
+      status: this.state.status === 'navigating' ? 'navigating' : 'choosing',
       selectedAlternativeIndex: index,
       currentInstruction: next,
       distanceToNextManeuverMeters: next?.distanceMeters,
       remainingDistanceMeters: route.distanceMeters,
       remainingDurationSeconds: route.durationSeconds,
-      message: `Taking: ${route.label ?? `Option ${index + 1}`}`,
+      message: `Selected: ${route.label ?? `Option ${index + 1}`}`,
+    });
+  }
+
+  /** Enter turn-by-turn navigation for the selected (or given) route. */
+  startNavigation(index?: number): void {
+    const pick = index ?? this.state.selectedAlternativeIndex ?? 0;
+    const route = this.alternatives[pick] ?? this.route;
+    if (!route) return;
+
+    this.route = route;
+    mapService.drawAlternatives(
+      this.alternatives.map((r) => r.coordinates),
+      pick,
+      false,
+    );
+    mapService.drawRoute(route.coordinates, pick);
+    mapService.fitRoute(route.coordinates);
+
+    const next = selectNextInstruction(route.instructions, 0);
+    this.setState({
+      ...this.state,
+      status: 'navigating',
+      selectedAlternativeIndex: pick,
+      showAllRoutes: false,
+      currentInstruction: next,
+      distanceToNextManeuverMeters: next?.distanceMeters,
+      remainingDistanceMeters: route.distanceMeters,
+      remainingDurationSeconds: route.durationSeconds,
+      offRoute: false,
+      message: undefined,
+      progress: undefined,
+    });
+
+    if (this.lastPosition) this.followRoute(this.lastPosition);
+  }
+
+  /**
+   * Load a previously saved / imported route into choosing mode
+   * so the rider can Start navigation without re-planning.
+   */
+  loadSavedRoute(saved: SavedRoute): void {
+    const calculated = savedToCalculatedRoute(saved);
+    this.route = calculated;
+    this.alternatives = [calculated];
+    if (saved.profile) this.profile = saved.profile;
+
+    mapService.clearAlternatives();
+    mapService.setDestination(saved.end);
+    mapService.drawRoute(calculated.coordinates, 0);
+    mapService.fitRoute(calculated.coordinates);
+
+    const next = selectNextInstruction(calculated.instructions, 0);
+    this.setState({
+      status: 'choosing',
+      destination: saved.end,
+      profile: this.profile,
+      alternatives: this.alternatives,
+      selectedAlternativeIndex: 0,
+      showAllRoutes: false,
+      currentInstruction: next,
+      distanceToNextManeuverMeters: next?.distanceMeters,
+      remainingDistanceMeters: calculated.distanceMeters,
+      remainingDurationSeconds: calculated.durationSeconds,
+      offRoute: false,
+      message: `Loaded · ${saved.name}`,
+      progress: undefined,
+    });
+  }
+
+  async saveActiveRoute(name?: string): Promise<SavedRoute> {
+    const route = this.getActiveCalculatedRoute();
+    if (!route) throw new Error('No route to save');
+    const label = name?.trim() || suggestRouteName(route, this.profile);
+    return routeLibrary.saveFromCalculated(route, label, {
+      start: route.coordinates[0],
+      end: this.state.destination ?? route.coordinates[route.coordinates.length - 1],
+    });
+  }
+
+  getActiveCalculatedRoute(): CalculatedRoute | null {
+    return (
+      this.route ??
+      this.alternatives[this.state.selectedAlternativeIndex ?? 0] ??
+      null
+    );
+  }
+
+  buildSavedSnapshot(name?: string): SavedRoute | null {
+    const route = this.getActiveCalculatedRoute();
+    if (!route) return null;
+    const label = name?.trim() || suggestRouteName(route, this.profile);
+    return calculatedToSavedRoute(route, label, {
+      start: route.coordinates[0],
+      end:
+        this.state.destination ??
+        route.coordinates[route.coordinates.length - 1],
     });
   }
 
@@ -194,7 +298,7 @@ export class NavigationService {
 
       const next = selectNextInstruction(this.route.instructions, 0);
       this.setState({
-        status: 'navigating',
+        status: 'choosing',
         destination: end,
         profile: this.profile,
         alternatives: this.alternatives,
@@ -207,8 +311,8 @@ export class NavigationService {
         offRoute: false,
         message:
           this.alternatives.length > 1
-            ? `${this.alternatives.length} routes found — tap a card or map line to choose`
-            : undefined,
+            ? `${this.alternatives.length} routes — pick one, then Start`
+            : 'Route ready — tap Start to navigate',
         progress: undefined,
       });
     } catch (e) {
@@ -348,21 +452,21 @@ export class NavigationService {
 
       mapService.clearGhostRoute();
       mapService.clearRecalcLink();
-      const showAll = this.alternatives.length > 1;
       mapService.drawAlternatives(
         this.alternatives.map((r) => r.coordinates),
         0,
-        showAll,
+        false,
       );
       mapService.drawRoute(this.route.coordinates, 0);
       const next = selectNextInstruction(this.route.instructions, 0);
+      // Stay in navigation mode after a mid-ride recalculation.
       this.setState({
         status: 'navigating',
         destination: this.state.destination,
         profile: this.profile,
         alternatives: this.alternatives,
         selectedAlternativeIndex: 0,
-        showAllRoutes: showAll,
+        showAllRoutes: false,
         currentInstruction: next,
         distanceToNextManeuverMeters: next?.distanceMeters,
         remainingDistanceMeters: this.route.distanceMeters,

@@ -9,6 +9,7 @@ import type { RoutingProfileId } from '../routing/routing-profiles';
 export type NavigationStatus =
   | 'idle'
   | 'planning'
+  | 'choosing'
   | 'navigating'
   | 'rerouting'
   | 'arrived'
