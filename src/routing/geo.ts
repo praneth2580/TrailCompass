@@ -89,3 +89,61 @@ export function remainingPolylineMeters(
 export function keyForCoordinate(c: Coordinate, precision = 6): string {
   return `${c[0].toFixed(precision)},${c[1].toFixed(precision)}`;
 }
+
+/**
+ * Point on the polyline at `targetMeters` from the start (clamped to ends).
+ */
+export function pointAlongPolylineMeters(
+  route: Coordinate[],
+  targetMeters: number,
+): { coordinate: Coordinate; alongMeters: number; index: number } | null {
+  if (route.length === 0) return null;
+  if (route.length === 1 || targetMeters <= 0) {
+    return { coordinate: route[0]!, alongMeters: 0, index: 0 };
+  }
+
+  let walked = 0;
+  for (let i = 1; i < route.length; i++) {
+    const a = route[i - 1]!;
+    const b = route[i]!;
+    const seg = haversineMeters(a, b);
+    if (walked + seg >= targetMeters) {
+      const remain = targetMeters - walked;
+      const t = seg > 0 ? remain / seg : 0;
+      const coordinate: Coordinate = [
+        a[0] + (b[0] - a[0]) * t,
+        a[1] + (b[1] - a[1]) * t,
+      ];
+      return { coordinate, alongMeters: targetMeters, index: i - 1 };
+    }
+    walked += seg;
+  }
+
+  const last = route.length - 1;
+  return {
+    coordinate: route[last]!,
+    alongMeters: walked,
+    index: last,
+  };
+}
+
+/** Checkpoints every `intervalMeters` along the route (excludes start; may include near-end). */
+export function pointsAlongPolylineEveryMeters(
+  route: Coordinate[],
+  intervalMeters: number,
+): Array<{ coordinate: Coordinate; alongMeters: number }> {
+  if (route.length < 2 || intervalMeters <= 0) return [];
+  const total = polylineLengthMeters(route);
+  if (total < intervalMeters * 0.35) return [];
+
+  const out: Array<{ coordinate: Coordinate; alongMeters: number }> = [];
+  for (
+    let target = intervalMeters;
+    target < total - intervalMeters * 0.15;
+    target += intervalMeters
+  ) {
+    const hit = pointAlongPolylineMeters(route, target);
+    if (hit) out.push({ coordinate: hit.coordinate, alongMeters: hit.alongMeters });
+  }
+  return out;
+}

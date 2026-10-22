@@ -1,6 +1,7 @@
 import type { Coordinate } from './routing-adapter';
 import type { NetworkFeatureCollection } from './graph-engine';
 import { haversineMeters } from './geo';
+import { interpolateGeodesic } from './route-chunking';
 import type { RoutingProgressListener } from './routing-progress';
 
 const OVERPASS_ENDPOINTS = [
@@ -8,9 +9,13 @@ const OVERPASS_ENDPOINTS = [
   'https://overpass.kumi.systems/api/interpreter',
 ];
 
-/** Keep queries small enough for public Overpass mirrors. */
-const MAX_ROUTE_SPAN_M = 80_000;
-const BBOX_PAD_DEG = 0.02;
+/** Keep queries small enough for public Overpass mirrors (per leg). */
+export const MAX_ROUTE_SPAN_M = 80_000;
+const BBOX_PAD_DEG = 0.025;
+/** Use corridor (around) queries once the leg is longer than this. */
+const CORRIDOR_SPAN_M = 25_000;
+const CORRIDOR_RADIUS_M = 4_000;
+const CORRIDOR_SAMPLE_M = 12_000;
 
 const HIGHWAY_REGEX =
   '^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|service|motorway_link|trunk_link|primary_link|secondary_link|tertiary_link)$';
@@ -32,6 +37,9 @@ const memoryCache = new Map<string, CacheEntry>();
 /**
  * Loads OSM driveable ways for a route corridor and returns a GeoJSON network.
  * This is road *data* for local A* — not an online routing API response.
+ *
+ * Long thin legs use overlapping `around` samples along the geodesic so the
+ * download stays a corridor instead of a huge diagonal bbox.
  */
 export async function loadOsmNetworkForRoute(
   start: Coordinate,
@@ -43,12 +51,15 @@ export async function loadOsmNetworkForRoute(
   const span = maxPairDistance(points);
   if (span > MAX_ROUTE_SPAN_M) {
     throw new Error(
-      `Route span is ${Math.round(span / 1000)} km — pick a closer destination (max ~${Math.round(MAX_ROUTE_SPAN_M / 1000)} km per plan while using live OSM extracts)`,
+      `Route leg is ${Math.round(span / 1000)} km — max ~${Math.round(MAX_ROUTE_SPAN_M / 1000)} km per chunk`,
     );
   }
 
   const bbox = paddedBbox(points);
-  const cacheKey = bboxKey(bbox);
+  const useCorridor = span >= CORRIDOR_SPAN_M;
+  const cacheKey = useCorridor
+    ? `corridor:${points.map((p) => `${p[0].toFixed(3)},${p[1].toFixed(3)}`).join('|')}`
+    : bboxKey(bbox);
   const cached = memoryCache.get(cacheKey);
   if (cached) {
     onProgress?.({
@@ -61,11 +72,15 @@ export async function loadOsmNetworkForRoute(
 
   onProgress?.({
     phase: 'downloading-roads',
-    label: 'Downloading connecting roads…',
+    label: useCorridor
+      ? 'Downloading road corridor…'
+      : 'Downloading connecting roads…',
     percent: null,
   });
 
-  const query = buildOverpassQuery(bbox);
+  const query = useCorridor
+    ? buildCorridorOverpassQuery(sampleCorridor(points))
+    : buildBboxOverpassQuery(bbox);
   const raw = await fetchOverpass(query, onProgress);
   onProgress?.({
     phase: 'building-graph',
@@ -79,7 +94,7 @@ export async function loadOsmNetworkForRoute(
   }
 
   memoryCache.set(cacheKey, { collection, loadedAt: Date.now() });
-  if (memoryCache.size > 12) {
+  if (memoryCache.size > 24) {
     const oldest = memoryCache.keys().next().value;
     if (oldest) memoryCache.delete(oldest);
   }
@@ -87,7 +102,9 @@ export async function loadOsmNetworkForRoute(
   return collection;
 }
 
-function buildOverpassQuery(bbox: [number, number, number, number]): string {
+function buildBboxOverpassQuery(
+  bbox: [number, number, number, number],
+): string {
   const [west, south, east, north] = bbox;
   return `
 [out:json][timeout:90];
@@ -96,6 +113,44 @@ function buildOverpassQuery(bbox: [number, number, number, number]): string {
 );
 out body geom;
 `.trim();
+}
+
+function buildCorridorOverpassQuery(samples: Coordinate[]): string {
+  const parts = samples
+    .map(([lon, lat]) => {
+      return `way["highway"~"${HIGHWAY_REGEX}"]["area"!~"yes"](around:${CORRIDOR_RADIUS_M},${lat},${lon});`;
+    })
+    .join('\n  ');
+  return `
+[out:json][timeout:90];
+(
+  ${parts}
+);
+out body geom;
+`.trim();
+}
+
+/** Sample points along consecutive segments for corridor Overpass queries. */
+function sampleCorridor(points: Coordinate[]): Coordinate[] {
+  if (points.length === 0) return [];
+  const samples: Coordinate[] = [points[0]!];
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]!;
+    const b = points[i]!;
+    const dist = haversineMeters(a, b);
+    const steps = Math.max(1, Math.ceil(dist / CORRIDOR_SAMPLE_M));
+    for (let s = 1; s <= steps; s++) {
+      samples.push(interpolateGeodesic(a, b, s / steps));
+    }
+  }
+  // Cap sample count for Overpass URL size / timeout.
+  if (samples.length <= 12) return samples;
+  const out: Coordinate[] = [];
+  for (let i = 0; i < 12; i++) {
+    const idx = Math.round((i / 11) * (samples.length - 1));
+    out.push(samples[idx]!);
+  }
+  return out;
 }
 
 async function fetchOverpass(

@@ -11,6 +11,11 @@ import {
 import { valhallaOfflineAdapter } from './valhalla-adapter';
 import { loadOsmNetworkForRoute } from './osm-network-loader';
 import {
+  expandRouteChain,
+  needsRouteChunking,
+  type RouteChainPoint,
+} from './route-chunking';
+import {
   idleProgress,
   type RoutingProgress,
   type RoutingProgressListener,
@@ -159,35 +164,28 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
         return [route];
       }
 
-      await this.ensureRoadGraph(start, end, waypoints);
+      // Long trips + user waypoints: chain short legs (download + A* per hop).
+      if (needsRouteChunking(start, end, waypoints)) {
+        const chain = expandRouteChain(start, end, waypoints);
+        const merged = await this.calculateChainedRoute(chain, profile);
+        this.emitProgress({
+          phase: 'done',
+          label:
+            chain.length > 2
+              ? `Route ready · ${chain.length - 1} legs`
+              : 'Route ready',
+          percent: 100,
+        });
+        return [merged];
+      }
+
+      await this.ensureRoadGraph(start, end);
 
       this.emitProgress({
         phase: 'calculating',
         label: 'Finding best & alternative roads…',
         percent: null,
       });
-
-      if (waypoints.length > 0) {
-        const legs: CalculatedRoute[] = [];
-        let cursor = start;
-        const stops = [...waypoints, end];
-        for (const stop of stops) {
-          await this.ensureRoadGraph(cursor, stop);
-          legs.push(
-            offlineGraphEngine.calculateRoute(cursor, stop, { profile }),
-          );
-          cursor = stop;
-        }
-        const merged = mergeRoutes(legs);
-        merged.profile = profile;
-        merged.label = 'Best match';
-        this.emitProgress({
-          phase: 'done',
-          label: 'Route ready',
-          percent: 100,
-        });
-        return [merged];
-      }
 
       const routes = offlineGraphEngine.calculateRoutes(start, end, {
         profile,
@@ -214,11 +212,90 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
     }
   }
 
+  /**
+   * Route a chain of points leg-by-leg. Each hop downloads only its corridor.
+   * Synthetic vias are snapped onto the nearest loaded road so geodesic
+   * midpoints in empty fields still connect.
+   */
+  private async calculateChainedRoute(
+    chain: RouteChainPoint[],
+    profile: RoutingProfileId,
+  ): Promise<CalculatedRoute> {
+    if (chain.length < 2) {
+      throw new Error('Route chain needs at least start and end');
+    }
+
+    const legs: CalculatedRoute[] = [];
+    let cursor = chain[0]!.coordinate;
+    const legCount = chain.length - 1;
+
+    for (let i = 1; i < chain.length; i++) {
+      const stop = chain[i]!;
+      const legIndex = i;
+      this.emitProgress({
+        phase: 'downloading-roads',
+        label: `Leg ${legIndex} of ${legCount} — loading roads…`,
+        percent:
+          legCount > 1
+            ? Math.round(((legIndex - 1) / legCount) * 100)
+            : null,
+      });
+
+      await this.ensureRoadGraph(cursor, stop.coordinate, {
+        progressLabel: `Leg ${legIndex} of ${legCount} — loading roads…`,
+        requireCoverage: !stop.synthetic,
+      });
+
+      let target = stop.coordinate;
+      if (stop.synthetic) {
+        const snapped = offlineGraphEngine.nearestRoadCoordinate(target, 12_000);
+        if (!snapped) {
+          throw new Error(
+            `Could not find roads near via point ${legIndex} of ${legCount}`,
+          );
+        }
+        target = snapped;
+      } else if (!offlineGraphEngine.coversPoints(cursor, target)) {
+        throw new Error(
+          `Could not snap onto roads for leg ${legIndex} of ${legCount} — try a pin closer to a street`,
+        );
+      }
+
+      this.emitProgress({
+        phase: 'calculating',
+        label: `Leg ${legIndex} of ${legCount} — calculating…`,
+        percent:
+          legCount > 1
+            ? Math.round(((legIndex - 0.5) / legCount) * 100)
+            : null,
+      });
+
+      legs.push(
+        offlineGraphEngine.calculateRoute(cursor, target, { profile }),
+      );
+      cursor = target;
+    }
+
+    const merged = mergeRoutes(legs);
+    merged.profile = profile;
+    merged.label =
+      legs.length > 1 ? `Best match · ${legs.length} legs` : 'Best match';
+    merged.id = `graph-chunked-${legs.length}`;
+    return merged;
+  }
+
   private async ensureRoadGraph(
     start: Coordinate,
     end: Coordinate,
-    waypoints: Coordinate[] = [],
+    options: {
+      progressLabel?: string;
+      waypoints?: Coordinate[];
+      /** When false, allow end to be snapped later (synthetic vias). */
+      requireCoverage?: boolean;
+    } = {},
   ): Promise<void> {
+    const requireCoverage = options.requireCoverage !== false;
+
     if (offlineGraphEngine.coversPoints(start, end)) {
       this.emitProgress({
         phase: 'checking-cache',
@@ -232,14 +309,18 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
       ...this.status,
       kind: 'graph',
       ready: true,
-      message: 'Downloading connecting roads…',
+      message: options.progressLabel ?? 'Downloading connecting roads…',
     });
 
     const collection = await loadOsmNetworkForRoute(
       start,
       end,
-      waypoints,
-      (progress) => this.emitProgress(progress),
+      options.waypoints ?? [],
+      (progress) =>
+        this.emitProgress({
+          ...progress,
+          label: options.progressLabel ?? progress.label,
+        }),
     );
     offlineGraphEngine.loadFeatureCollection(collection);
 
@@ -252,7 +333,7 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
       message: `Routing on ${collection.features.length} OSM ways`,
     });
 
-    if (!offlineGraphEngine.coversPoints(start, end)) {
+    if (requireCoverage && !offlineGraphEngine.coversPoints(start, end)) {
       throw new Error(
         'Could not snap onto downloaded roads — try a pin closer to a street',
       );

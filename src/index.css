@@ -1132,6 +1132,39 @@ button.tc-plan-row:active {
   text-align: center;
 }
 
+.tc-plan-hint {
+  margin: 0.15rem 0 0;
+  color: var(--tc-muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.tc-plan-meal-toggles {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0.45rem;
+}
+
+.tc-plan-suggest {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.55rem;
+  align-items: center;
+  width: 100%;
+  min-height: 3.1rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 12px;
+  border: 1px solid var(--tc-border);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.tc-plan-suggest-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
 .tc-map-pick-banner {
   position: absolute;
   z-index: 6;

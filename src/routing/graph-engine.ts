@@ -113,6 +113,20 @@ export class OfflineGraphEngine {
     );
   }
 
+  /**
+   * Nearest road coordinate to `point`.
+   * Used to pull synthetic long-route vias onto the loaded corridor.
+   */
+  nearestRoadCoordinate(
+    point: Coordinate,
+    maxMeters = 8_000,
+  ): Coordinate | null {
+    if (!this.isReady()) return null;
+    const snap = this.snapToNearestNode(point);
+    if (!snap || snap.distanceMeters > maxMeters) return null;
+    return this.nodes.get(snap.key)?.coordinate ?? null;
+  }
+
   loadFeatureCollection(
     collection: NetworkFeatureCollection,
     meta?: Partial<RoutingNetworkMeta>,

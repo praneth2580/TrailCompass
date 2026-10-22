@@ -16,6 +16,7 @@ import {
 import { formatDistanceShort, formatEtaShort } from '../routing/route-naming';
 import { StopPickerSheet, type StopPickerMode } from './StopPickerSheet';
 import { PoiFinderSheet } from './PoiFinderSheet';
+import { StopSuggestSheet } from './StopSuggestSheet';
 
 interface PlanScreenProps {
   gpsCoordinate: Coordinate | null;
@@ -42,7 +43,8 @@ export function PlanScreen({
     tripPlanner.getState(),
   );
   const [pickerMode, setPickerMode] = useState<StopPickerMode | null>(null);
-  const [poiKind, setPoiKind] = useState<PoiKind | null>(null);
+  const [suggestKind, setSuggestKind] = useState<PoiKind | null>(null);
+  const [browseKind, setBrowseKind] = useState<PoiKind | null>(null);
 
   useEffect(() => tripPlanner.subscribe(setItinerary), []);
 
@@ -54,6 +56,10 @@ export function PlanScreen({
       nav.status === 'navigating' ||
       nav.status === 'rerouting');
   const summaryRoute = activeRoute;
+  const existingStopCoords = [
+    ...stops.map((s) => s.coordinate),
+    ...(destination ? [destination.coordinate] : []),
+  ];
 
   const handlePickerPick = (stop: TripStop) => {
     if (pickerMode === 'destination') {
@@ -64,14 +70,14 @@ export function PlanScreen({
     setPickerMode(null);
   };
 
-  const handlePoiPick = (stop: TripStop) => {
+  const handleStopPick = (stop: TripStop) => {
     tripPlanner.addStop(stop, activeRoute?.coordinates ?? null);
-    setPoiKind(null);
   };
 
   const openMapPick = (kind: StopKind, mode: 'destination' | 'stop') => {
     setPickerMode(null);
-    setPoiKind(null);
+    setSuggestKind(null);
+    setBrowseKind(null);
     onRequestMapPick(kind, mode);
   };
 
@@ -81,8 +87,8 @@ export function PlanScreen({
         <p className="tc-downloads-brand">TrailCompass</p>
         <h1 className="tc-section-title">Plan</h1>
         <p className="tc-section-copy">
-          Build your trip as a list — fuel, food, and custom stops — then
-          preview on the map.
+          Build your trip as a list — fuel by tank range, food by time of day —
+          then preview on the map.
         </p>
       </header>
 
@@ -143,7 +149,7 @@ export function PlanScreen({
             type="button"
             className="tc-plan-add-btn"
             disabled={!destination && !gpsCoordinate}
-            onClick={() => setPoiKind('fuel')}
+            onClick={() => setSuggestKind('fuel')}
           >
             <span className="tc-plan-add-glyph tc-plan-add-fuel">F</span>
             Fuel
@@ -152,7 +158,7 @@ export function PlanScreen({
             type="button"
             className="tc-plan-add-btn"
             disabled={!destination && !gpsCoordinate}
-            onClick={() => setPoiKind('food')}
+            onClick={() => setSuggestKind('food')}
           >
             <span className="tc-plan-add-glyph tc-plan-add-food">E</span>
             Food
@@ -166,6 +172,12 @@ export function PlanScreen({
             Custom
           </button>
         </div>
+        {!hasRoute ? (
+          <p className="tc-plan-hint">
+            Tip: Preview on map first for smarter fuel/food suggestions along
+            the route.
+          </p>
+        ) : null}
       </section>
 
       <section className="tc-plan-summary" aria-live="polite">
@@ -244,13 +256,30 @@ export function PlanScreen({
         }
       />
 
+      <StopSuggestSheet
+        open={suggestKind != null}
+        kind={suggestKind ?? 'fuel'}
+        route={activeRoute}
+        existingCoordinates={existingStopCoords}
+        onClose={() => setSuggestKind(null)}
+        onPick={handleStopPick}
+        onBrowse={() => {
+          const kind = suggestKind ?? 'fuel';
+          setSuggestKind(null);
+          setBrowseKind(kind);
+        }}
+      />
+
       <PoiFinderSheet
-        open={poiKind != null}
-        kind={poiKind ?? 'fuel'}
+        open={browseKind != null}
+        kind={browseKind ?? 'fuel'}
         near={gpsCoordinate}
         route={activeRoute?.coordinates ?? null}
-        onClose={() => setPoiKind(null)}
-        onPick={handlePoiPick}
+        onClose={() => setBrowseKind(null)}
+        onPick={(stop) => {
+          handleStopPick(stop);
+          setBrowseKind(null);
+        }}
       />
     </main>
   );
@@ -280,7 +309,9 @@ function StopRow({
       <div className="tc-plan-row-body">
         <strong>{stop.name}</strong>
         <span>
-          {stopKindLabel(stop.kind)} · {formatCoordShort(stop.coordinate)}
+          {stop.notes
+            ? stop.notes
+            : `${stopKindLabel(stop.kind)} · ${formatCoordShort(stop.coordinate)}`}
         </span>
       </div>
       <div className="tc-plan-row-controls">
