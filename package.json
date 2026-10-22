@@ -12,7 +12,9 @@
     "cap:build": "npm run cap:sync && node scripts/android-build.mjs",
     "cap:emulator": "node scripts/android-run.mjs start",
     "cap:install": "node scripts/android-run.mjs install",
-    "cap:run": "npm run cap:build && node scripts/android-run.mjs run"
+    "cap:run": "npm run cap:build && node scripts/android-run.mjs run",
+    "release:minor": "node scripts/release.mjs minor",
+    "release:major": "node scripts/release.mjs major"
   },
   "dependencies": {
     "@capacitor/android": "^7.6.9",
