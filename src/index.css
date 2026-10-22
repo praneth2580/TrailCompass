@@ -328,22 +328,23 @@ button {
 /* ── Compass ────────────────────────────────────────────── */
 
 .tc-compass {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.75rem;
+  display: inline-flex;
   align-items: center;
-  padding: 0.65rem 0.75rem;
+  gap: 0.5rem;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 0.28rem 0.7rem 0.28rem 0.28rem;
   background: var(--tc-panel);
   border: 1px solid var(--tc-border);
-  border-radius: var(--tc-radius);
+  border-radius: 999px;
   backdrop-filter: blur(14px);
   box-shadow: var(--tc-shadow);
 }
 
 .tc-compass-dial {
   position: relative;
-  width: 72px;
-  height: 72px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   border: 2px solid var(--tc-border-strong);
   background:
@@ -358,34 +359,34 @@ button {
 .tc-compass-tick {
   position: absolute;
   font-family: var(--tc-font-display);
-  font-size: 0.62rem;
+  font-size: 0.5rem;
   font-weight: 700;
   color: var(--tc-muted);
   line-height: 1;
 }
 
 .tc-compass-tick-n {
-  top: 5px;
+  top: 3px;
   left: 50%;
   transform: translateX(-50%);
   color: var(--tc-accent);
-  font-size: 0.7rem;
+  font-size: 0.55rem;
 }
 
 .tc-compass-tick-e {
-  right: 6px;
+  right: 3px;
   top: 50%;
   transform: translateY(-50%);
 }
 
 .tc-compass-tick-s {
-  bottom: 5px;
+  bottom: 3px;
   left: 50%;
   transform: translateX(-50%);
 }
 
 .tc-compass-tick-w {
-  left: 6px;
+  left: 3px;
   top: 50%;
   transform: translateY(-50%);
 }
@@ -394,9 +395,9 @@ button {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 8px;
+  width: 6px;
   height: 62%;
-  margin-left: -4px;
+  margin-left: -3px;
   margin-top: -31%;
   transform-origin: 50% 50%;
   transition: transform 120ms linear;
@@ -409,16 +410,16 @@ button {
 .tc-compass-needle-tail {
   width: 0;
   height: 0;
-  border-left: 4px solid transparent;
-  border-right: 4px solid transparent;
+  border-left: 3px solid transparent;
+  border-right: 3px solid transparent;
 }
 
 .tc-compass-needle-tip {
-  border-bottom: 24px solid var(--tc-danger);
+  border-bottom: 14px solid var(--tc-danger);
 }
 
 .tc-compass-needle-tail {
-  border-top: 20px solid rgba(240, 244, 239, 0.85);
+  border-top: 11px solid rgba(240, 244, 239, 0.85);
 }
 
 .tc-compass-hub {
@@ -444,7 +445,7 @@ button {
 
 .tc-compass-heading {
   font-family: var(--tc-font-display);
-  font-size: 1.65rem;
+  font-size: 1.05rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
@@ -565,6 +566,25 @@ button {
   font-weight: 700;
 }
 
+.tc-nav-working {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  margin-top: 0.35rem;
+}
+
+.tc-nav-working-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.tc-nav-working .tc-nav-instruction {
+  margin-top: 0;
+}
+
 .tc-nav-instruction {
   margin: 0.2rem 0 0;
   font-family: var(--tc-font-display);
@@ -666,7 +686,7 @@ button {
   z-index: 3;
   flex-shrink: 0;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
   gap: 0.25rem;
   padding: 0.4rem 0.5rem calc(0.4rem + var(--tc-safe-bottom));
   padding-left: calc(0.5rem + var(--tc-safe-left));
@@ -708,7 +728,463 @@ button {
   text-transform: uppercase;
 }
 
+/* ── Plan screen ────────────────────────────────────────── */
+
+.tc-plan-shell {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.tc-main-plan {
+  flex: 1;
+  min-height: 0;
+  padding: calc(1.15rem + var(--tc-safe-top)) calc(1.1rem + var(--tc-safe-right))
+    1.15rem calc(1.1rem + var(--tc-safe-left));
+  gap: 1rem;
+  overflow: auto;
+  background:
+    radial-gradient(ellipse 90% 55% at 10% -10%, rgba(61, 190, 165, 0.16), transparent 55%),
+    linear-gradient(180deg, #10231c 0%, var(--tc-bg) 38%);
+}
+
+.tc-plan-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.tc-plan-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.65rem;
+  border-radius: var(--tc-radius);
+  border: 1px solid var(--tc-border);
+  background: rgba(8, 18, 14, 0.72);
+  box-shadow: var(--tc-shadow);
+}
+
+.tc-plan-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.65rem;
+  align-items: center;
+  min-height: var(--tc-touch);
+  padding: 0.55rem 0.6rem;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.03);
+  color: inherit;
+  text-align: left;
+}
+
+button.tc-plan-row {
+  cursor: pointer;
+  width: 100%;
+  font: inherit;
+}
+
+button.tc-plan-row:active {
+  border-color: var(--tc-border-strong);
+  background: var(--tc-accent-soft);
+}
+
+.tc-plan-row-dest {
+  border-style: dashed;
+  border-color: rgba(240, 160, 32, 0.35);
+}
+
+.tc-plan-row-fixed {
+  opacity: 0.92;
+}
+
+.tc-plan-badge {
+  display: grid;
+  place-items: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  border-radius: 999px;
+  font-family: var(--tc-font-display);
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #06100c;
+  flex-shrink: 0;
+}
+
+.tc-plan-badge-start {
+  background: #8aa194;
+}
+
+.tc-plan-badge-end {
+  background: var(--tc-accent);
+}
+
+.tc-plan-badge-fuel {
+  background: #3dbea5;
+}
+
+.tc-plan-badge-food {
+  background: #e07a5f;
+}
+
+.tc-plan-badge-manual {
+  background: #7b8cff;
+}
+
+.tc-plan-row-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.tc-plan-row-body strong {
+  font-size: 0.95rem;
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tc-plan-row-body span {
+  color: var(--tc-muted);
+  font-size: 0.72rem;
+  font-family: var(--tc-font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tc-plan-row-action {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--tc-accent);
+}
+
+.tc-plan-row-controls {
+  display: flex;
+  gap: 0.2rem;
+}
+
+.tc-plan-icon-btn {
+  display: grid;
+  place-items: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  border: 1px solid var(--tc-border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--tc-text);
+  cursor: pointer;
+}
+
+.tc-plan-icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.tc-plan-icon-danger {
+  color: var(--tc-danger);
+}
+
+.tc-plan-add {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.tc-plan-add-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.tc-plan-add-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  min-height: 4.4rem;
+  padding: 0.65rem 0.4rem;
+  border-radius: 14px;
+  border: 1px solid var(--tc-border);
+  background: rgba(8, 18, 14, 0.65);
+  color: var(--tc-text);
+  font-family: var(--tc-font-display);
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.tc-plan-add-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.tc-plan-add-btn:active:not(:disabled) {
+  border-color: var(--tc-border-strong);
+  background: var(--tc-accent-soft);
+}
+
+.tc-plan-add-glyph {
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: #06100c;
+}
+
+.tc-plan-add-fuel {
+  background: #3dbea5;
+}
+
+.tc-plan-add-food {
+  background: #e07a5f;
+}
+
+.tc-plan-add-manual {
+  background: #7b8cff;
+}
+
+.tc-plan-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.15rem 0.15rem 0;
+}
+
+.tc-plan-summary-line {
+  margin: 0;
+  color: var(--tc-muted);
+  font-size: 0.9rem;
+}
+
+.tc-plan-summary-line strong {
+  color: var(--tc-text);
+  font-family: var(--tc-font-mono);
+  font-weight: 600;
+}
+
+.tc-plan-summary-error {
+  margin: 0;
+  color: var(--tc-danger);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.tc-plan-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+  padding-bottom: 0.5rem;
+}
+
+.tc-plan-primary,
+.tc-plan-secondary,
+.tc-plan-clear {
+  min-height: var(--tc-touch);
+  border-radius: 14px;
+  font-family: var(--tc-font-display);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.tc-plan-primary {
+  border: none;
+  background: var(--tc-accent);
+  color: #1a1205;
+}
+
+.tc-plan-primary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.tc-plan-primary:active:not(:disabled) {
+  filter: brightness(1.05);
+}
+
+.tc-plan-secondary {
+  border: 1px solid var(--tc-border-strong);
+  background: transparent;
+  color: var(--tc-accent);
+}
+
+.tc-plan-secondary:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.tc-plan-clear {
+  border: none;
+  background: transparent;
+  color: var(--tc-muted);
+  font-size: 0.78rem;
+  min-height: 2.4rem;
+}
+
+.tc-plan-search input {
+  width: 100%;
+  min-height: 2.85rem;
+  padding: 0.65rem 0.8rem;
+  border-radius: 12px;
+  border: 1px solid var(--tc-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--tc-text);
+  font-size: 1rem;
+  outline: none;
+}
+
+.tc-plan-search input:focus {
+  border-color: var(--tc-border-strong);
+  box-shadow: 0 0 0 3px rgba(240, 160, 32, 0.15);
+}
+
+.tc-plan-quick-actions,
+.tc-plan-scope {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.45rem;
+}
+
+.tc-plan-quick-btn,
+.tc-plan-scope-btn {
+  min-height: 2.6rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 12px;
+  border: 1px solid var(--tc-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--tc-text);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tc-plan-quick-btn:disabled,
+.tc-plan-scope-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.tc-plan-scope-btn-active {
+  border-color: var(--tc-border-strong);
+  background: var(--tc-accent-soft);
+  color: var(--tc-accent);
+}
+
+.tc-plan-hit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.15rem 0;
+}
+
+.tc-plan-hit {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  align-items: flex-start;
+  width: 100%;
+  min-height: 3.1rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 12px;
+  border: 1px solid var(--tc-border);
+  background: rgba(255, 255, 255, 0.03);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tc-plan-hit:active {
+  border-color: var(--tc-border-strong);
+  background: var(--tc-accent-soft);
+}
+
+.tc-plan-hit-name {
+  font-weight: 650;
+  font-size: 0.92rem;
+}
+
+.tc-plan-hit-meta {
+  color: var(--tc-muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.tc-plan-hit-empty {
+  margin: 0.5rem 0;
+  color: var(--tc-muted);
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.tc-map-pick-banner {
+  position: absolute;
+  z-index: 6;
+  left: 50%;
+  top: calc(0.75rem + var(--tc-safe-top));
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  max-width: min(92vw, 26rem);
+  padding: 0.55rem 0.65rem 0.55rem 0.9rem;
+  border-radius: 14px;
+  border: 1px solid var(--tc-border-strong);
+  background: rgba(8, 16, 12, 0.94);
+  box-shadow: var(--tc-shadow);
+}
+
+.tc-map-pick-banner p {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 650;
+}
+
+.tc-map-pick-banner .tc-btn {
+  min-height: 2.2rem;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.75rem;
+}
+
+.tc-stop-marker {
+  line-height: 0;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.45));
+}
+
 /* ── Downloads screen ───────────────────────────────────── */
+
+.tc-main-library {
+  flex: 1;
+  min-height: 0;
+  padding: calc(1.15rem + var(--tc-safe-top)) calc(1.1rem + var(--tc-safe-right))
+    1.15rem calc(1.1rem + var(--tc-safe-left));
+  gap: 1rem;
+  overflow: auto;
+  background:
+    radial-gradient(ellipse 85% 50% at 90% -5%, rgba(240, 160, 32, 0.14), transparent 55%),
+    linear-gradient(180deg, #152218 0%, var(--tc-bg) 36%);
+}
+
+.tc-library-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
 
 .tc-main-downloads {
   padding: calc(1.15rem + var(--tc-safe-top)) calc(1.1rem + var(--tc-safe-right))
@@ -1070,6 +1546,35 @@ button {
   display: grid;
   grid-template-columns: 1fr 1.35fr;
   gap: 0.5rem;
+}
+
+.tc-sheet-actions-single {
+  grid-template-columns: 1fr;
+}
+
+.tc-sheet-tall {
+  max-height: min(88dvh, 40rem);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.tc-sheet-tall .tc-plan-hit-list {
+  flex: 1;
+  min-height: 8rem;
+  overflow: auto;
+}
+
+.tc-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .tc-sheet-actions .tc-btn {
@@ -1586,58 +2091,15 @@ button {
   line-height: 1.35;
 }
 
-.tc-route-progress {
-  position: absolute;
-  left: 50%;
-  top: calc(var(--tc-pad) + var(--tc-safe-top) + 0.35rem);
-  transform: translateX(-50%);
-  z-index: 3;
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  max-width: min(92vw, 22rem);
-  padding: 0.7rem 0.9rem;
-  border-radius: var(--tc-radius);
-  background: var(--tc-panel);
-  border: 1px solid var(--tc-border-strong);
-  box-shadow: var(--tc-shadow);
-  backdrop-filter: blur(14px);
-  pointer-events: none;
-}
-
 .tc-route-progress-spinner {
   width: 1.35rem;
   height: 1.35rem;
+  margin-top: 0.15rem;
   border-radius: 50%;
   border: 2px solid var(--tc-border);
   border-top-color: var(--tc-accent);
   flex-shrink: 0;
   animation: tc-spin 0.75s linear infinite;
-}
-
-@keyframes tc-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.tc-route-progress-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-  min-width: 0;
-  flex: 1;
-}
-
-.tc-route-progress-label {
-  font-size: 0.9rem;
-  font-weight: 700;
-  line-height: 1.25;
-}
-
-.tc-route-progress-hint {
-  color: var(--tc-muted);
-  font-size: 0.75rem;
 }
 
 .tc-route-progress-track {
@@ -1826,17 +2288,13 @@ button {
     max-width: min(62vw, 26rem);
   }
 
-  .tc-compass {
-    padding: 0.45rem 0.6rem;
-  }
-
   .tc-compass-dial {
-    width: 56px;
-    height: 56px;
+    width: 40px;
+    height: 40px;
   }
 
   .tc-compass-heading {
-    font-size: 1.25rem;
+    font-size: 0.95rem;
   }
 
   .tc-map-dock {

@@ -42,7 +42,9 @@ export class NavigationService {
     alternatives: [],
     selectedAlternativeIndex: 0,
     showAllRoutes: false,
+    waypoints: [],
   };
+  private waypoints: Coordinate[] = [];
   private route: CalculatedRoute | null = null;
   private alternatives: CalculatedRoute[] = [];
   private lastPosition: Coordinate | null = null;
@@ -97,6 +99,22 @@ export class NavigationService {
         this.state.status === 'navigating'
           ? this.state.message
           : 'Destination set — plan a route',
+    });
+  }
+
+  setWaypoints(waypoints: Coordinate[]): void {
+    this.waypoints = [...waypoints];
+    this.setState({ ...this.state, waypoints: this.waypoints });
+  }
+
+  clearItinerary(): void {
+    this.waypoints = [];
+    mapService.clearItinerary();
+    this.setState({
+      ...this.state,
+      destination: undefined,
+      waypoints: [],
+      message: 'Tap the map to set a destination',
     });
   }
 
@@ -169,10 +187,18 @@ export class NavigationService {
     const calculated = savedToCalculatedRoute(saved);
     this.route = calculated;
     this.alternatives = [calculated];
+    this.waypoints = [...(saved.waypoints ?? [])];
     if (saved.profile) this.profile = saved.profile;
 
     mapService.clearAlternatives();
     mapService.setDestination(saved.end);
+    mapService.setItineraryStops(
+      this.waypoints.map((coordinate, i) => ({
+        coordinate,
+        kind: 'manual' as const,
+        name: `Stop ${i + 1}`,
+      })),
+    );
     mapService.drawRoute(calculated.coordinates, 0);
     mapService.fitRoute(calculated.coordinates);
 
@@ -180,6 +206,7 @@ export class NavigationService {
     this.setState({
       status: 'choosing',
       destination: saved.end,
+      waypoints: this.waypoints,
       profile: this.profile,
       alternatives: this.alternatives,
       selectedAlternativeIndex: 0,
@@ -201,6 +228,7 @@ export class NavigationService {
     return routeLibrary.saveFromCalculated(route, label, {
       start: route.coordinates[0],
       end: this.state.destination ?? route.coordinates[route.coordinates.length - 1],
+      waypoints: this.waypoints,
     });
   }
 
@@ -221,6 +249,7 @@ export class NavigationService {
       end:
         this.state.destination ??
         route.coordinates[route.coordinates.length - 1],
+      waypoints: this.waypoints,
     });
   }
 
@@ -246,6 +275,8 @@ export class NavigationService {
   ): Promise<void> {
     await this.ensureEngine();
 
+    this.waypoints = waypoints ? [...waypoints] : [];
+    mapService.setDestination(end);
     mapService.drawRecalcLink(start, end);
     mapService.setRouteRecalculating(true);
     mapService.clearAlternatives();
@@ -253,6 +284,7 @@ export class NavigationService {
     this.setState({
       status: 'planning',
       destination: end,
+      waypoints: this.waypoints,
       offRoute: false,
       profile: this.profile,
       alternatives: [],
@@ -269,9 +301,9 @@ export class NavigationService {
 
     try {
       const options = {
-        waypoints,
+        waypoints: this.waypoints,
         profile: this.profile,
-        alternatives: 3,
+        alternatives: this.waypoints.length > 0 ? 1 : 3,
       };
       this.alternatives =
         typeof this.adapter.calculateRoutes === 'function'
@@ -300,6 +332,7 @@ export class NavigationService {
       this.setState({
         status: 'choosing',
         destination: end,
+        waypoints: this.waypoints,
         profile: this.profile,
         alternatives: this.alternatives,
         selectedAlternativeIndex: 0,
@@ -312,7 +345,9 @@ export class NavigationService {
         message:
           this.alternatives.length > 1
             ? `${this.alternatives.length} routes — pick one, then Start`
-            : 'Route ready — tap Start to navigate',
+            : this.waypoints.length > 0
+              ? `Route ready · ${this.waypoints.length} stop${this.waypoints.length === 1 ? '' : 's'} — tap Start`
+              : 'Route ready — tap Start to navigate',
         progress: undefined,
       });
     } catch (e) {
@@ -326,6 +361,7 @@ export class NavigationService {
       this.setState({
         status: 'error',
         destination: end,
+        waypoints: this.waypoints,
         profile: this.profile,
         alternatives: [],
         selectedAlternativeIndex: 0,
@@ -432,7 +468,13 @@ export class NavigationService {
     const unsubProgress = this.bindProgress();
 
     try {
-      const options = { profile: this.profile, alternatives: 3 };
+      // Keep remaining waypoints ahead of the rider when possible.
+      const remainingWaypoints = this.waypoints;
+      const options = {
+        profile: this.profile,
+        alternatives: remainingWaypoints.length > 0 ? 1 : 3,
+        waypoints: remainingWaypoints,
+      };
       this.alternatives =
         typeof this.adapter.calculateRoutes === 'function'
           ? await this.adapter.calculateRoutes(
@@ -463,6 +505,7 @@ export class NavigationService {
       this.setState({
         status: 'navigating',
         destination: this.state.destination,
+        waypoints: this.waypoints,
         profile: this.profile,
         alternatives: this.alternatives,
         selectedAlternativeIndex: 0,
@@ -539,6 +582,7 @@ export class NavigationService {
     this.setState({
       status: 'idle',
       destination: this.state.destination,
+      waypoints: this.waypoints,
       profile: this.profile,
       alternatives: [],
       selectedAlternativeIndex: 0,

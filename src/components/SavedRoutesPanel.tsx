@@ -108,7 +108,7 @@ export function SavedRoutesPanel({
   return (
     <section className="tc-saved-routes" aria-label="Saved routes">
       <div className="tc-saved-routes-header">
-        <h2 className="tc-list-heading">Saved routes</h2>
+        <h2 className="tc-list-heading">Saved trips</h2>
         <button
           type="button"
           className="tc-btn tc-btn-ghost"
@@ -132,11 +132,6 @@ export function SavedRoutesPanel({
           onChange={(e) => void handleFileChange(e)}
         />
       </div>
-
-      <p className="tc-section-copy">
-        Share <code>.trailcompass.json</code> files between devices, then Open
-        and Start on the map.
-      </p>
 
       {message ? (
         <p

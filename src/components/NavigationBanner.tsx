@@ -37,8 +37,22 @@ export function NavigationBanner({
     state.status === 'idle' ||
     state.status === 'error' ||
     state.status === 'arrived';
-  const instruction =
-    navMode || rideMode ? text : (state.message ?? text);
+  const progress = state.progress;
+  const working =
+    (state.status === 'planning' || state.status === 'rerouting') &&
+    progress != null &&
+    progress.phase !== 'idle';
+  const showPercent =
+    working &&
+    progress.percent != null &&
+    Number.isFinite(progress.percent) &&
+    progress.bytesTotal != null &&
+    progress.bytesTotal > 0;
+  const instruction = working
+    ? progress.label || state.message || 'Working…'
+    : navMode || rideMode
+      ? text
+      : (state.message ?? text);
 
   const bannerClass = showPlan
     ? 'tc-nav-banner tc-nav-banner-idle'
@@ -59,7 +73,34 @@ export function NavigationBanner({
         {!navMode && !rideMode ? (
           <span className="tc-nav-status">{statusLabel(state.status)}</span>
         ) : null}
-        <p className="tc-nav-instruction">{instruction}</p>
+        <div className={working ? 'tc-nav-working' : undefined}>
+          {working ? <div className="tc-route-progress-spinner" aria-hidden /> : null}
+          <div className="tc-nav-working-copy">
+            <p className="tc-nav-instruction">{instruction}</p>
+            {showPercent && progress ? (
+              <>
+                <div
+                  className="tc-route-progress-track"
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(progress.percent!)}
+                >
+                  <div
+                    className="tc-route-progress-fill"
+                    style={{ width: `${Math.round(progress.percent!)}%` }}
+                  />
+                </div>
+                <span className="tc-route-progress-pct">
+                  {Math.round(progress.percent!)}%
+                  {progress.bytesReceived != null && progress.bytesTotal != null
+                    ? ` · ${formatBytes(progress.bytesReceived)} / ${formatBytes(progress.bytesTotal)}`
+                    : ''}
+                </span>
+              </>
+            ) : null}
+          </div>
+        </div>
         {state.offRoute ? <p className="tc-nav-offroute">Off route</p> : null}
         {(choosing || navMode || state.status === 'rerouting') &&
         state.remainingDistanceMeters != null ? (
@@ -174,6 +215,12 @@ function statusLabel(status: NavigationState['status']): string {
     default:
       return status.replace(/_/g, ' ');
   }
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function formatRemaining(meters: number): string {

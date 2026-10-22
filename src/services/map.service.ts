@@ -78,6 +78,7 @@ export class MapLibreAdapter implements MapAdapter {
   private positionEl: HTMLDivElement | null = null;
   private positionMode: 'dot' | 'arrow' = 'dot';
   private destinationMarker: Marker | null = null;
+  private stopMarkers: Marker[] = [];
   private framedToPosition = false;
   private styleLoaded = false;
   private clickListeners = new Set<(coordinate: Coordinate) => void>();
@@ -223,6 +224,37 @@ export class MapLibreAdapter implements MapAdapter {
     } else {
       this.destinationMarker.setLngLat(lngLat);
     }
+  }
+
+  /**
+   * Draw intermediate itinerary stops (fuel / food / manual).
+   * Destination stays on setDestination.
+   */
+  setItineraryStops(
+    stops: Array<{
+      coordinate: Coordinate;
+      kind: 'fuel' | 'food' | 'manual' | 'destination';
+      name?: string;
+    }>,
+  ): void {
+    if (!this.map) return;
+    this.clearItineraryStops();
+    for (const stop of stops) {
+      if (stop.kind === 'destination') continue;
+      const marker = new Marker({
+        element: createStopPinElement(stop.kind, stop.name),
+        anchor: 'bottom',
+        offset: [0, 2],
+      })
+        .setLngLat([stop.coordinate[0], stop.coordinate[1]])
+        .addTo(this.map);
+      this.stopMarkers.push(marker);
+    }
+  }
+
+  clearItineraryStops(): void {
+    for (const marker of this.stopMarkers) marker.remove();
+    this.stopMarkers = [];
   }
 
   fitBounds(
@@ -515,6 +547,11 @@ export class MapLibreAdapter implements MapAdapter {
     this.setRouteRecalculating(false);
   }
 
+  clearItinerary(): void {
+    this.setDestination(null);
+    this.clearItineraryStops();
+  }
+
   async switchToRegion(_regionId: string): Promise<{ ok: boolean; message: string }> {
     return {
       ok: false,
@@ -534,6 +571,7 @@ export class MapLibreAdapter implements MapAdapter {
     this.positionMode = 'dot';
     this.destinationMarker?.remove();
     this.destinationMarker = null;
+    this.clearItineraryStops();
     this.clickListeners.clear();
     this.routePickListeners.clear();
     this.framedToPosition = false;
@@ -645,6 +683,31 @@ function createDestinationPinElement(): HTMLDivElement {
       />
       <circle cx="20" cy="18" r="6.5" fill="#1a1205" />
       <circle cx="20" cy="18" r="3.2" fill="#f5f0e6" />
+    </svg>
+  `;
+  return el;
+}
+
+function createStopPinElement(
+  kind: 'fuel' | 'food' | 'manual',
+  name?: string,
+): HTMLDivElement {
+  const el = document.createElement('div');
+  el.className = `tc-stop-marker tc-stop-marker-${kind}`;
+  el.setAttribute('aria-label', name ?? kind);
+  const fill =
+    kind === 'fuel' ? '#3dbea5' : kind === 'food' ? '#e07a5f' : '#7b8cff';
+  const glyph = kind === 'fuel' ? 'F' : kind === 'food' ? 'E' : '+';
+  el.innerHTML = `
+    <svg class="tc-stop-pin" viewBox="0 0 40 52" width="30" height="39" aria-hidden="true">
+      <path
+        fill="${fill}"
+        stroke="#1a1205"
+        stroke-width="2"
+        d="M20 2C11.2 2 4 9.2 4 18c0 12.5 16 30 16 30s16-17.5 16-30C36 9.2 28.8 2 20 2z"
+      />
+      <circle cx="20" cy="18" r="8" fill="#1a1205" />
+      <text x="20" y="22.5" text-anchor="middle" font-size="12" font-family="sans-serif" font-weight="700" fill="#f5f0e6">${glyph}</text>
     </svg>
   `;
   return el;

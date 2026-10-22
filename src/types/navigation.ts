@@ -39,6 +39,8 @@ export interface CompassReading {
 export interface NavigationState {
   status: NavigationStatus;
   destination?: Coordinate;
+  /** Intermediate stops between start and destination (visit order). */
+  waypoints?: Coordinate[];
   currentInstruction?: TurnInstruction;
   distanceToNextManeuverMeters?: number;
   remainingDistanceMeters?: number;

@@ -14,7 +14,8 @@
     "cap:install": "node scripts/android-run.mjs install",
     "cap:run": "npm run cap:build && node scripts/android-run.mjs run",
     "release:minor": "node scripts/release.mjs minor",
-    "release:major": "node scripts/release.mjs major"
+    "release:major": "node scripts/release.mjs major",
+    "icons:generate": "node scripts/generate-icons.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^7.6.9",

@@ -2,7 +2,7 @@
  * Lightweight route table for the app shell.
  * Full client-side routing can replace this later if screens multiply.
  */
-export type AppScreen = 'map' | 'downloads';
+export type AppScreen = 'map' | 'plan' | 'library' | 'downloads';
 
 export interface AppRoute {
   id: AppScreen;
@@ -12,10 +12,14 @@ export interface AppRoute {
 
 export const APP_ROUTES: AppRoute[] = [
   { id: 'map', label: 'Map', path: '/' },
-  { id: 'downloads', label: 'Library', path: '/downloads' },
+  { id: 'plan', label: 'Plan', path: '/plan' },
+  { id: 'library', label: 'Library', path: '/library' },
+  { id: 'downloads', label: 'Offline', path: '/downloads' },
 ];
 
 export function resolveScreen(path: string): AppScreen {
+  if (path.includes('plan')) return 'plan';
+  if (path.includes('library')) return 'library';
   if (path.includes('download')) return 'downloads';
   return 'map';
 }

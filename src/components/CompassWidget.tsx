@@ -14,11 +14,14 @@ export function CompassWidget({ reading, onEnable }: CompassWidgetProps) {
     ? reading?.message?.split('—')[0]?.trim() || 'No heading'
     : reading?.accuracy;
 
+  const label =
+    displayHeading == null ? 'Compass unavailable' : `Heading ${displayHeading} degrees`;
+
   return (
-    <div className="tc-compass" aria-live="polite">
+    <div className="tc-compass" aria-live="polite" aria-label={label}>
       <div
         className="tc-compass-dial"
-        aria-hidden={unavailable}
+        aria-hidden
         data-unavailable={unavailable || undefined}
       >
         <span className="tc-compass-tick tc-compass-tick-n" aria-hidden>
@@ -50,10 +53,9 @@ export function CompassWidget({ reading, onEnable }: CompassWidgetProps) {
           {displayHeading == null ? '—' : `${displayHeading}°`}
         </strong>
         <span className="tc-compass-accuracy">{detail}</span>
-        {!unavailable && reading?.needsCalibration ? (
-          <span className="tc-compass-warn">Calibrate</span>
-        ) : null}
-        {unavailable && onEnable ? (
+        {unavailable &&
+        onEnable &&
+        (reading == null || /permission/i.test(reading.message ?? '')) ? (
           <button
             type="button"
             className="tc-btn tc-btn-ghost"
