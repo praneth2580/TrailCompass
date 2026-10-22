@@ -9,7 +9,7 @@
  *   node scripts/release.mjs major --draft
  */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { copyFileSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { root, runGradle } from './android-env.mjs';
 
@@ -135,6 +135,12 @@ if (!existsSync(apkPath)) {
   process.exit(1);
 }
 
+const [major, minor] = next.split('.');
+const apkName = `${JSON.parse(readFileSync(pkgPath, 'utf8')).name}.${major}.${minor}.0.apk`;
+const versionedApk = path.join(path.dirname(apkPath), apkName);
+copyFileSync(apkPath, versionedApk);
+console.log(`APK ${apkName}`);
+
 const tag = `v${next}`;
 const message = notes || `Release ${tag}`;
 const versioned = ['package.json', 'android/app/build.gradle', 'android/app/src/main/res/xml/config.xml', lockPath]
@@ -149,7 +155,7 @@ run('git', ['push', 'origin', tag]);
 
 const releaseArgs = [
   'release', 'create', tag,
-  apkPath,
+  versionedApk,
   '--title', `TrailCompass ${tag}`,
   '--notes', message,
 ];

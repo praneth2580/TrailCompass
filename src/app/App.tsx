@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react';
 import { MapView } from '../components/MapView';
 import { CompassWidget } from '../components/CompassWidget';
 import { NavigationBanner } from '../components/NavigationBanner';
+import { RouteProgressOverlay } from '../components/RouteProgressOverlay';
+import { RouteOptionsPanel } from '../components/RouteOptionsPanel';
+import type { RoutingProfileId } from '../routing/routing-profiles';
 import {
   locationService,
   formatGpsChipLabel,
@@ -89,6 +92,19 @@ export default function App() {
     void navigationService.planRoute(resolveStart(), nav.destination);
   };
 
+  const handleProfileChange = (profile: RoutingProfileId) => {
+    navigationService.setProfile(profile);
+    // Re-plan when already navigating so the new preference applies.
+    if (
+      nav.destination &&
+      (nav.status === 'navigating' ||
+        nav.status === 'error' ||
+        nav.status === 'idle')
+    ) {
+      void navigationService.planRoute(resolveStart(), nav.destination);
+    }
+  };
+
   const handleGoToMyLocation = () => {
     if (!fix) {
       void locationService.startWatching();
@@ -106,6 +122,7 @@ export default function App() {
             fix={fix}
             followGps={followGps}
             onMapClick={handleMapClick}
+            onRoutePick={(index) => navigationService.selectAlternative(index)}
           />
 
           <button
@@ -117,14 +134,14 @@ export default function App() {
             title={fix ? 'Go to my location' : 'Waiting for GPS…'}
           >
             <svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden>
-              <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2" />
               <path
-                d="M12 2v3M12 19v3M2 12h3M19 12h3"
+                d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21"
                 stroke="currentColor"
                 strokeWidth="2"
                 strokeLinecap="round"
               />
-              <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="2" />
+              <circle cx="12" cy="12" r="7" stroke="currentColor" strokeWidth="2" />
+              <circle cx="12" cy="12" r="2.75" fill="currentColor" />
             </svg>
           </button>
 
@@ -158,12 +175,38 @@ export default function App() {
             />
           </aside>
 
-          <NavigationBanner
-            state={nav}
-            canPlan={canPlan}
-            onPlan={handlePlanRoute}
-            onStop={() => navigationService.stop()}
+          <RouteProgressOverlay
+            active={nav.status === 'planning' || nav.status === 'rerouting'}
+            progress={nav.progress}
           />
+
+          <div className="tc-map-dock">
+            <RouteOptionsPanel
+              visible={
+                Boolean(nav.destination) &&
+                nav.status !== 'planning' &&
+                nav.status !== 'rerouting'
+              }
+              profile={nav.profile ?? 'fastest'}
+              alternatives={nav.alternatives ?? []}
+              selectedIndex={nav.selectedAlternativeIndex ?? 0}
+              showAllRoutes={nav.showAllRoutes === true}
+              onProfileChange={handleProfileChange}
+              onSelectAlternative={(index) =>
+                navigationService.selectAlternative(index)
+              }
+              onToggleShowAll={(showAll) =>
+                navigationService.setShowAllRoutes(showAll)
+              }
+            />
+
+            <NavigationBanner
+              state={nav}
+              canPlan={canPlan}
+              onPlan={handlePlanRoute}
+              onStop={() => navigationService.stop()}
+            />
+          </div>
         </main>
       ) : (
         <main className="tc-main tc-main-downloads">

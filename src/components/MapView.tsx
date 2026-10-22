@@ -8,21 +8,28 @@ interface MapViewProps {
   fix: GpsFix | null;
   followGps?: boolean;
   onMapClick?: (coordinate: Coordinate) => void;
+  onRoutePick?: (index: number) => void;
 }
 
 export function MapView({
   fix,
   followGps = true,
   onMapClick,
+  onRoutePick,
 }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const readyRef = useRef(false);
   const [status, setStatus] = useState(() => mapService.reportMapDataStatus());
   const onMapClickRef = useRef(onMapClick);
+  const onRoutePickRef = useRef(onRoutePick);
 
   useEffect(() => {
     onMapClickRef.current = onMapClick;
   }, [onMapClick]);
+
+  useEffect(() => {
+    onRoutePickRef.current = onRoutePick;
+  }, [onRoutePick]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -32,6 +39,9 @@ export function MapView({
     const unsubscribeClick = mapService.subscribeClick((coordinate) => {
       onMapClickRef.current?.(coordinate);
     });
+    const unsubscribeRoutePick = mapService.subscribeRoutePick((index) => {
+      onRoutePickRef.current?.(index);
+    });
     mapService.initialize(el);
     readyRef.current = true;
 
@@ -39,6 +49,7 @@ export function MapView({
       readyRef.current = false;
       unsubscribeStatus();
       unsubscribeClick();
+      unsubscribeRoutePick();
       mapService.dispose();
     };
   }, []);

@@ -1,3 +1,5 @@
+import type { RoutingProfileId } from './routing-profiles';
+
 export type Coordinate = [longitude: number, latitude: number];
 
 export interface TurnInstruction {
@@ -11,14 +13,31 @@ export interface CalculatedRoute {
   distanceMeters: number;
   durationSeconds: number;
   instructions: TurnInstruction[];
+  id?: string;
+  profile?: RoutingProfileId;
+  label?: string;
+  meta?: { edgeCount?: number };
+}
+
+export interface RouteRequestOptions {
+  waypoints?: Coordinate[];
+  profile?: RoutingProfileId;
+  /** How many distinct corridor alternatives to return (including best). */
+  alternatives?: number;
 }
 
 export interface RoutingAdapter {
   calculateRoute(
     start: Coordinate,
     end: Coordinate,
-    waypoints?: Coordinate[],
+    waypointsOrOptions?: Coordinate[] | RouteRequestOptions,
   ): Promise<CalculatedRoute>;
+
+  calculateRoutes?(
+    start: Coordinate,
+    end: Coordinate,
+    options?: RouteRequestOptions,
+  ): Promise<CalculatedRoute[]>;
 }
 
 export { offlineRoutingAdapter as defaultRoutingAdapter } from './offline-adapter';

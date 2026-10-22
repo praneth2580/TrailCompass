@@ -1,4 +1,10 @@
-import type { Coordinate, TurnInstruction } from '../routing/routing-adapter';
+import type {
+  CalculatedRoute,
+  Coordinate,
+  TurnInstruction,
+} from '../routing/routing-adapter';
+import type { RoutingProgress } from '../routing/routing-progress';
+import type { RoutingProfileId } from '../routing/routing-profiles';
 
 export type NavigationStatus =
   | 'idle'
@@ -38,4 +44,11 @@ export interface NavigationState {
   remainingDurationSeconds?: number;
   offRoute: boolean;
   message?: string;
+  /** Present while planning/rerouting; percent only when realistically known. */
+  progress?: RoutingProgress;
+  profile?: RoutingProfileId;
+  alternatives?: CalculatedRoute[];
+  selectedAlternativeIndex?: number;
+  /** When true, every alternative is drawn vividly on the map. */
+  showAllRoutes?: boolean;
 }

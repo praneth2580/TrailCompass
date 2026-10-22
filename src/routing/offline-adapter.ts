@@ -1,6 +1,7 @@
 import type {
   CalculatedRoute,
   Coordinate,
+  RouteRequestOptions,
   RoutingAdapter,
 } from './routing-adapter';
 import {
@@ -9,6 +10,12 @@ import {
 } from './graph-engine';
 import { valhallaOfflineAdapter } from './valhalla-adapter';
 import { loadOsmNetworkForRoute } from './osm-network-loader';
+import {
+  idleProgress,
+  type RoutingProgress,
+  type RoutingProgressListener,
+} from './routing-progress';
+import type { RoutingProfileId } from './routing-profiles';
 
 export const DEMO_NETWORK_URL = '/assets/routing/demo-network.geojson';
 export const VALHALLA_TILES_URL = '/assets/routing/valhalla-tiles.tar';
@@ -39,11 +46,17 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
     message: 'Routing engine not initialized',
   };
   private listeners = new Set<(status: OfflineEngineStatus) => void>();
+  private progressListeners = new Set<RoutingProgressListener>();
 
   subscribe(listener: (status: OfflineEngineStatus) => void): () => void {
     this.listeners.add(listener);
     listener(this.status);
     return () => this.listeners.delete(listener);
+  }
+
+  subscribeProgress(listener: RoutingProgressListener): () => void {
+    this.progressListeners.add(listener);
+    return () => this.progressListeners.delete(listener);
   }
 
   getStatus(): OfflineEngineStatus {
@@ -97,36 +110,108 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
   async calculateRoute(
     start: Coordinate,
     end: Coordinate,
-    waypoints?: Coordinate[],
+    waypointsOrOptions?: Coordinate[] | RouteRequestOptions,
   ): Promise<CalculatedRoute> {
+    const routes = await this.calculateRoutes(
+      start,
+      end,
+      normalizeOptions(waypointsOrOptions),
+    );
+    return routes[0]!;
+  }
+
+  async calculateRoutes(
+    start: Coordinate,
+    end: Coordinate,
+    options: RouteRequestOptions = {},
+  ): Promise<CalculatedRoute[]> {
     if (!this.initialized) {
       await this.initialize();
     }
     if (!this.status.ready) {
-      throw new Error(
-        this.status.message || 'Routing engine pending',
-      );
+      throw new Error(this.status.message || 'Routing engine pending');
     }
 
-    if (this.status.kind === 'valhalla') {
-      return valhallaOfflineAdapter.calculateRoute(start, end, waypoints);
-    }
+    const waypoints = options.waypoints ?? [];
+    const profile: RoutingProfileId = options.profile ?? 'fastest';
+    const alternatives = options.alternatives ?? 3;
 
-    await this.ensureRoadGraph(start, end, waypoints);
-
-    if (waypoints && waypoints.length > 0) {
-      const legs: CalculatedRoute[] = [];
-      let cursor = start;
-      const stops = [...waypoints, end];
-      for (const stop of stops) {
-        await this.ensureRoadGraph(cursor, stop);
-        legs.push(offlineGraphEngine.calculateRoute(cursor, stop));
-        cursor = stop;
+    try {
+      if (this.status.kind === 'valhalla') {
+        this.emitProgress({
+          phase: 'calculating',
+          label: 'Calculating route…',
+          percent: null,
+        });
+        const route = await valhallaOfflineAdapter.calculateRoute(
+          start,
+          end,
+          waypoints,
+        );
+        route.profile = profile;
+        route.label = 'Best match';
+        route.id = `valhalla-${profile}`;
+        this.emitProgress({
+          phase: 'done',
+          label: 'Route ready',
+          percent: 100,
+        });
+        return [route];
       }
-      return mergeRoutes(legs);
-    }
 
-    return offlineGraphEngine.calculateRoute(start, end);
+      await this.ensureRoadGraph(start, end, waypoints);
+
+      this.emitProgress({
+        phase: 'calculating',
+        label: 'Finding best & alternative roads…',
+        percent: null,
+      });
+
+      if (waypoints.length > 0) {
+        const legs: CalculatedRoute[] = [];
+        let cursor = start;
+        const stops = [...waypoints, end];
+        for (const stop of stops) {
+          await this.ensureRoadGraph(cursor, stop);
+          legs.push(
+            offlineGraphEngine.calculateRoute(cursor, stop, { profile }),
+          );
+          cursor = stop;
+        }
+        const merged = mergeRoutes(legs);
+        merged.profile = profile;
+        merged.label = 'Best match';
+        this.emitProgress({
+          phase: 'done',
+          label: 'Route ready',
+          percent: 100,
+        });
+        return [merged];
+      }
+
+      const routes = offlineGraphEngine.calculateRoutes(start, end, {
+        profile,
+        alternatives,
+      });
+      this.emitProgress({
+        phase: 'done',
+        label:
+          routes.length > 1
+            ? `${routes.length} road options ready`
+            : 'Route ready',
+        percent: 100,
+      });
+      return routes;
+    } catch (e) {
+      this.emitProgress({
+        phase: 'error',
+        label: e instanceof Error ? e.message : 'Routing failed',
+        percent: null,
+      });
+      throw e;
+    } finally {
+      window.setTimeout(() => this.emitProgress(idleProgress()), 400);
+    }
   }
 
   private async ensureRoadGraph(
@@ -135,6 +220,11 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
     waypoints: Coordinate[] = [],
   ): Promise<void> {
     if (offlineGraphEngine.coversPoints(start, end)) {
+      this.emitProgress({
+        phase: 'checking-cache',
+        label: 'Roads already loaded',
+        percent: 100,
+      });
       return;
     }
 
@@ -145,7 +235,12 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
       message: 'Downloading connecting roads…',
     });
 
-    const collection = await loadOsmNetworkForRoute(start, end, waypoints);
+    const collection = await loadOsmNetworkForRoute(
+      start,
+      end,
+      waypoints,
+      (progress) => this.emitProgress(progress),
+    );
     offlineGraphEngine.loadFeatureCollection(collection);
 
     this.setStatus({
@@ -168,6 +263,20 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
     this.status = status;
     for (const listener of this.listeners) listener(status);
   }
+
+  private emitProgress(progress: RoutingProgress): void {
+    for (const listener of this.progressListeners) listener(progress);
+  }
+}
+
+function normalizeOptions(
+  waypointsOrOptions?: Coordinate[] | RouteRequestOptions,
+): RouteRequestOptions {
+  if (!waypointsOrOptions) return {};
+  if (Array.isArray(waypointsOrOptions)) {
+    return { waypoints: waypointsOrOptions };
+  }
+  return waypointsOrOptions;
 }
 
 function mergeRoutes(legs: CalculatedRoute[]): CalculatedRoute {

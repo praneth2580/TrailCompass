@@ -1,6 +1,7 @@
 import type { Coordinate } from './routing-adapter';
 import type { NetworkFeatureCollection } from './graph-engine';
 import { haversineMeters } from './geo';
+import type { RoutingProgressListener } from './routing-progress';
 
 const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
@@ -36,6 +37,7 @@ export async function loadOsmNetworkForRoute(
   start: Coordinate,
   end: Coordinate,
   waypoints: Coordinate[] = [],
+  onProgress?: RoutingProgressListener,
 ): Promise<NetworkFeatureCollection> {
   const points = [start, ...waypoints, end];
   const span = maxPairDistance(points);
@@ -48,10 +50,28 @@ export async function loadOsmNetworkForRoute(
   const bbox = paddedBbox(points);
   const cacheKey = bboxKey(bbox);
   const cached = memoryCache.get(cacheKey);
-  if (cached) return cached.collection;
+  if (cached) {
+    onProgress?.({
+      phase: 'checking-cache',
+      label: 'Using cached roads',
+      percent: 100,
+    });
+    return cached.collection;
+  }
+
+  onProgress?.({
+    phase: 'downloading-roads',
+    label: 'Downloading connecting roads…',
+    percent: null,
+  });
 
   const query = buildOverpassQuery(bbox);
-  const raw = await fetchOverpass(query);
+  const raw = await fetchOverpass(query, onProgress);
+  onProgress?.({
+    phase: 'building-graph',
+    label: 'Building road graph…',
+    percent: null,
+  });
   const collection = overpassToNetwork(raw, bbox);
 
   if (collection.features.length === 0) {
@@ -59,7 +79,6 @@ export async function loadOsmNetworkForRoute(
   }
 
   memoryCache.set(cacheKey, { collection, loadedAt: Date.now() });
-  // Bound memory use.
   if (memoryCache.size > 12) {
     const oldest = memoryCache.keys().next().value;
     if (oldest) memoryCache.delete(oldest);
@@ -79,7 +98,10 @@ out body geom;
 `.trim();
 }
 
-async function fetchOverpass(query: string): Promise<{ elements?: OverpassElement[] }> {
+async function fetchOverpass(
+  query: string,
+  onProgress?: RoutingProgressListener,
+): Promise<{ elements?: OverpassElement[] }> {
   let lastError: Error | undefined;
   for (const endpoint of OVERPASS_ENDPOINTS) {
     try {
@@ -95,12 +117,76 @@ async function fetchOverpass(query: string): Promise<{ elements?: OverpassElemen
         lastError = new Error(`Overpass HTTP ${response.status}`);
         continue;
       }
-      return (await response.json()) as { elements?: OverpassElement[] };
+
+      const text = await readResponseText(response, onProgress);
+      return JSON.parse(text) as { elements?: OverpassElement[] };
     } catch (e) {
       lastError = e instanceof Error ? e : new Error('Overpass request failed');
     }
   }
   throw lastError ?? new Error('Could not download road network');
+}
+
+/**
+ * Read body with byte progress when Content-Length is present.
+ * If length is missing, percent stays null (indeterminate — no fake %).
+ */
+async function readResponseText(
+  response: Response,
+  onProgress?: RoutingProgressListener,
+): Promise<string> {
+  const totalHeader = response.headers.get('content-length');
+  const bytesTotal =
+    totalHeader && /^\d+$/.test(totalHeader) ? Number(totalHeader) : null;
+
+  if (!response.body || bytesTotal == null || bytesTotal <= 0) {
+    onProgress?.({
+      phase: 'downloading-roads',
+      label: 'Downloading connecting roads…',
+      percent: null,
+    });
+    return response.text();
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let bytesReceived = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      chunks.push(value);
+      bytesReceived += value.byteLength;
+      const percent = Math.min(
+        99,
+        Math.round((bytesReceived / bytesTotal) * 100),
+      );
+      onProgress?.({
+        phase: 'downloading-roads',
+        label: 'Downloading connecting roads…',
+        percent,
+        bytesReceived,
+        bytesTotal,
+      });
+    }
+  }
+
+  onProgress?.({
+    phase: 'downloading-roads',
+    label: 'Downloading connecting roads…',
+    percent: 100,
+    bytesReceived,
+    bytesTotal,
+  });
+
+  const merged = new Uint8Array(bytesReceived);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(merged);
 }
 
 function overpassToNetwork(
@@ -112,7 +198,6 @@ function overpassToNetwork(
   for (const el of raw.elements ?? []) {
     if (el.type !== 'way' || !el.geometry || el.geometry.length < 2) continue;
     const tags = el.tags ?? {};
-    // Skip explicitly non-motor roads.
     if (tags.motor_vehicle === 'no' || tags.motorcycle === 'no') continue;
     if (tags.access === 'no' || tags.access === 'private') continue;
 

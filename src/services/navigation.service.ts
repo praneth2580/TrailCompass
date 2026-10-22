@@ -13,6 +13,8 @@ import {
 } from '../routing/geo';
 import { mapService } from './map.service';
 import { offlineRoutingAdapter } from '../routing/offline-adapter';
+import type { RoutingProgress } from '../routing/routing-progress';
+import type { RoutingProfileId } from '../routing/routing-profiles';
 
 export type NavigationListener = (state: NavigationState) => void;
 
@@ -29,12 +31,18 @@ export class NavigationService {
     status: 'idle',
     offRoute: false,
     message: 'Tap the map to set a destination',
+    profile: 'fastest',
+    alternatives: [],
+    selectedAlternativeIndex: 0,
+    showAllRoutes: false,
   };
   private route: CalculatedRoute | null = null;
+  private alternatives: CalculatedRoute[] = [];
   private lastPosition: Coordinate | null = null;
   private lastRerouteAt = 0;
   private listeners = new Set<NavigationListener>();
   private engineReady = false;
+  private profile: RoutingProfileId = 'fastest';
 
   constructor(adapter: RoutingAdapter = defaultRoutingAdapter) {
     this.adapter = adapter;
@@ -85,6 +93,48 @@ export class NavigationService {
     });
   }
 
+  setProfile(profile: RoutingProfileId): void {
+    this.profile = profile;
+    this.setState({ ...this.state, profile });
+  }
+
+  selectAlternative(index: number): void {
+    const route = this.alternatives[index];
+    if (!route) return;
+    this.route = route;
+    mapService.drawAlternatives(
+      this.alternatives.map((r) => r.coordinates),
+      index,
+      this.state.showAllRoutes === true,
+    );
+    mapService.drawRoute(route.coordinates, index);
+    const next = selectNextInstruction(route.instructions, 0);
+    this.setState({
+      ...this.state,
+      selectedAlternativeIndex: index,
+      currentInstruction: next,
+      distanceToNextManeuverMeters: next?.distanceMeters,
+      remainingDistanceMeters: route.distanceMeters,
+      remainingDurationSeconds: route.durationSeconds,
+      message: `Taking: ${route.label ?? `Option ${index + 1}`}`,
+    });
+  }
+
+  setShowAllRoutes(showAll: boolean): void {
+    mapService.drawAlternatives(
+      this.alternatives.map((r) => r.coordinates),
+      this.state.selectedAlternativeIndex ?? 0,
+      showAll,
+    );
+    if (this.route) {
+      mapService.drawRoute(
+        this.route.coordinates,
+        this.state.selectedAlternativeIndex ?? 0,
+      );
+    }
+    this.setState({ ...this.state, showAllRoutes: showAll });
+  }
+
   async planRoute(
     start: Coordinate,
     end: Coordinate,
@@ -92,28 +142,74 @@ export class NavigationService {
   ): Promise<void> {
     await this.ensureEngine();
 
+    mapService.drawRecalcLink(start, end);
+    mapService.setRouteRecalculating(true);
+    mapService.clearAlternatives();
+
     this.setState({
       status: 'planning',
       destination: end,
       offRoute: false,
+      profile: this.profile,
+      alternatives: [],
+      selectedAlternativeIndex: 0,
       message: 'Loading roads and calculating route…',
+      progress: {
+        phase: 'downloading-roads',
+        label: 'Preparing route…',
+        percent: null,
+      },
     });
 
+    const unsubProgress = this.bindProgress();
+
     try {
-      this.route = await this.adapter.calculateRoute(start, end, waypoints);
-      mapService.drawRoute(this.route.coordinates);
-      mapService.fitRoute(this.route.coordinates);
+      const options = {
+        waypoints,
+        profile: this.profile,
+        alternatives: 3,
+      };
+      this.alternatives =
+        typeof this.adapter.calculateRoutes === 'function'
+          ? await this.adapter.calculateRoutes(start, end, options)
+          : [await this.adapter.calculateRoute(start, end, options)];
+
+      this.route = this.alternatives[0] ?? null;
+      if (!this.route) {
+        throw new Error('No routes returned');
+      }
+
+      mapService.clearRecalcLink();
+      mapService.clearGhostRoute();
+      const showAll = this.alternatives.length > 1;
+      mapService.drawAlternatives(
+        this.alternatives.map((r) => r.coordinates),
+        0,
+        showAll,
+      );
+      mapService.drawRoute(this.route.coordinates, 0);
+      if (!showAll) {
+        mapService.fitRoute(this.route.coordinates);
+      }
 
       const next = selectNextInstruction(this.route.instructions, 0);
       this.setState({
         status: 'navigating',
         destination: end,
+        profile: this.profile,
+        alternatives: this.alternatives,
+        selectedAlternativeIndex: 0,
+        showAllRoutes: showAll,
         currentInstruction: next,
         distanceToNextManeuverMeters: next?.distanceMeters,
         remainingDistanceMeters: this.route.distanceMeters,
         remainingDurationSeconds: this.route.durationSeconds,
         offRoute: false,
-        message: undefined,
+        message:
+          this.alternatives.length > 1
+            ? `${this.alternatives.length} routes found — tap a card or map line to choose`
+            : undefined,
+        progress: undefined,
       });
     } catch (e) {
       const message =
@@ -121,13 +217,20 @@ export class NavigationService {
           ? e.message
           : 'Routing failed — offline engine error';
       this.route = null;
+      this.alternatives = [];
       mapService.clearRoute();
       this.setState({
         status: 'error',
         destination: end,
+        profile: this.profile,
+        alternatives: [],
+        selectedAlternativeIndex: 0,
         offRoute: false,
         message,
+        progress: undefined,
       });
+    } finally {
+      unsubProgress();
     }
   }
 
@@ -203,40 +306,103 @@ export class NavigationService {
     if (this.state.status === 'rerouting') return;
 
     this.lastRerouteAt = now;
+    const previous = this.route?.coordinates;
+    if (previous && previous.length >= 2) {
+      mapService.drawGhostRoute(previous);
+      mapService.setRouteRecalculating(true);
+    }
+    mapService.drawRecalcLink(position, this.state.destination);
+
     this.setState({
       ...this.state,
       status: 'rerouting',
       offRoute: true,
-      message: 'Rerouting offline…',
+      message: 'Recalculating on roads…',
+      progress: {
+        phase: 'downloading-roads',
+        label: 'Recalculating…',
+        percent: null,
+      },
     });
 
+    const unsubProgress = this.bindProgress();
+
     try {
-      this.route = await this.adapter.calculateRoute(
-        position,
-        this.state.destination,
+      const options = { profile: this.profile, alternatives: 3 };
+      this.alternatives =
+        typeof this.adapter.calculateRoutes === 'function'
+          ? await this.adapter.calculateRoutes(
+              position,
+              this.state.destination,
+              options,
+            )
+          : [
+              await this.adapter.calculateRoute(
+                position,
+                this.state.destination,
+                options,
+              ),
+            ];
+      this.route = this.alternatives[0] ?? null;
+      if (!this.route) throw new Error('No routes returned');
+
+      mapService.clearGhostRoute();
+      mapService.clearRecalcLink();
+      const showAll = this.alternatives.length > 1;
+      mapService.drawAlternatives(
+        this.alternatives.map((r) => r.coordinates),
+        0,
+        showAll,
       );
-      mapService.drawRoute(this.route.coordinates);
+      mapService.drawRoute(this.route.coordinates, 0);
       const next = selectNextInstruction(this.route.instructions, 0);
       this.setState({
         status: 'navigating',
         destination: this.state.destination,
+        profile: this.profile,
+        alternatives: this.alternatives,
+        selectedAlternativeIndex: 0,
+        showAllRoutes: showAll,
         currentInstruction: next,
         distanceToNextManeuverMeters: next?.distanceMeters,
         remainingDistanceMeters: this.route.distanceMeters,
         remainingDurationSeconds: this.route.durationSeconds,
         offRoute: false,
         message: undefined,
+        progress: undefined,
       });
     } catch (e) {
       const message =
         e instanceof Error ? e.message : 'Offline reroute failed';
+      mapService.clearRecalcLink();
+      mapService.setRouteRecalculating(false);
+      // Keep ghost of previous path so the rider still sees something.
       this.setState({
         ...this.state,
         status: 'navigating',
         offRoute: true,
         message: `Still off route — ${message}`,
+        progress: undefined,
       });
+    } finally {
+      unsubProgress();
     }
+  }
+
+  private bindProgress(): () => void {
+    return offlineRoutingAdapter.subscribeProgress((progress: RoutingProgress) => {
+      if (
+        this.state.status !== 'planning' &&
+        this.state.status !== 'rerouting'
+      ) {
+        return;
+      }
+      this.setState({
+        ...this.state,
+        progress,
+        message: progress.label || this.state.message,
+      });
+    });
   }
 
   private arrive(): void {
@@ -264,10 +430,15 @@ export class NavigationService {
 
   stop(): void {
     this.route = null;
+    this.alternatives = [];
     mapService.clearRoute();
     this.setState({
       status: 'idle',
       destination: this.state.destination,
+      profile: this.profile,
+      alternatives: [],
+      selectedAlternativeIndex: 0,
+      showAllRoutes: false,
       offRoute: false,
       currentInstruction: undefined,
       distanceToNextManeuverMeters: undefined,
