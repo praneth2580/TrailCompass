@@ -9,8 +9,13 @@ import { buildManeuversFromPath } from './maneuver-builder';
 import { MinHeap } from './min-heap';
 import type { NetworkCoverage } from './network-coverage';
 import {
-  edgeCostMeters,
-  estimateDurationSeconds,
+  CONTROL_DELAY_SECONDS,
+  roadAttributes,
+  type NetworkControl,
+  type RoadTags,
+} from './road-attributes';
+import {
+  edgeCost,
   minCostPerMeter,
   type RoutingProfileId,
 } from './routing-profiles';
@@ -28,6 +33,11 @@ const MAX_OVERLAP_RATIO = 0.72;
 const MAX_LENGTH_RATIO = 1.55;
 /** Multiply cost of edges used on prior alternatives. */
 const USED_EDGE_PENALTY = 6;
+/** Signals closer than this are one junction (dual carriageways). */
+const SIGNAL_CLUSTER_M = 50;
+const SIGNAL_CELL_DEG = 0.001;
+/** Access=destination roads: fine to start/end on, poor as a through route. */
+const DESTINATION_ONLY_PENALTY = 5;
 
 interface LineStringGeometry {
   type: 'LineString';
@@ -41,8 +51,18 @@ interface NetworkFeature {
     highway?: string | null;
     name?: string | null;
     osm_id?: number | null;
+    /** Subset of OSM way tags (see ROAD_TAG_KEYS). */
+    tags?: RoadTags | null;
   } | null;
   geometry: LineStringGeometry | { type: string; coordinates?: unknown };
+}
+
+/**
+ * The loaded roads don't connect the two points (or don't reach them).
+ * Callers may retry with a wider download.
+ */
+export class NoRoadPathError extends Error {
+  override name = 'NoRoadPathError';
 }
 
 export interface NetworkFeatureCollection {
@@ -56,19 +76,45 @@ export interface NetworkFeatureCollection {
     coverage?: NetworkCoverage;
   };
   features: NetworkFeature[];
+  /** Signals, stop signs, level crossings, toll booths on the ways. */
+  controls?: NetworkControl[];
+  /** Turn restrictions (via-node only). */
+  restrictions?: NetworkRestriction[];
+}
+
+export interface NetworkRestriction {
+  fromWay: number;
+  via: Coordinate;
+  toWay: number;
+  /** `no_*` forbids the turn; `only_*` forbids every other exit. */
+  kind: 'no' | 'only';
 }
 
 interface GraphEdge {
   id: string;
   to: string;
+  wayId: number;
   meters: number;
+  /** Ride time including `delaySeconds`. */
+  seconds: number;
+  delaySeconds: number;
   highway: string;
+  expressway: boolean;
+  destinationOnly: boolean;
   geometry: Coordinate[];
 }
 
 interface GraphNode {
   coordinate: Coordinate;
   edges: GraphEdge[];
+  /** Touched by at least one non-expressway edge. */
+  ordinary: boolean;
+}
+
+/** Exits allowed when arriving at a via node from one way. */
+interface TurnRule {
+  no: Set<number>;
+  only: Set<number> | null;
 }
 
 export interface RoutingNetworkMeta {
@@ -84,6 +130,13 @@ export interface RouteOptions {
   profile?: RoutingProfileId;
   /** Max alternatives including the primary (capped). */
   alternatives?: number;
+  /** Ride motorways / expressways not tagged for motorcycles. Default false. */
+  allowExpressways?: boolean;
+}
+
+interface FoundPath {
+  edges: GraphEdge[];
+  startKey: string;
 }
 
 /**
@@ -95,6 +148,10 @@ export class OfflineGraphEngine {
   /** Node keys bucketed by grid cell, so snapping avoids a full scan. */
   private grid = new Map<string, string[]>();
   private gridBounds = emptyGridBounds();
+  private controls = new Map<string, NetworkControl>();
+  private signalCluster = new Map<string, number>();
+  /** via node key → from way id → turn rule. */
+  private turnRules = new Map<string, Map<number, TurnRule>>();
   private ready = false;
   private meta: RoutingNetworkMeta = {
     id: 'none',
@@ -127,9 +184,14 @@ export class OfflineGraphEngine {
   nearestRoadCoordinate(
     point: Coordinate,
     maxMeters = 8_000,
+    options: { allowExpressways?: boolean } = {},
   ): Coordinate | null {
     if (!this.isReady()) return null;
-    const snap = this.snapToNearestNode(point, maxMeters);
+    const snap = this.snapToNearestNode(
+      point,
+      maxMeters,
+      options.allowExpressways ?? true,
+    );
     if (!snap) return null;
     return this.nodes.get(snap.key)?.coordinate ?? null;
   }
@@ -142,6 +204,11 @@ export class OfflineGraphEngine {
     this.grid.clear();
     this.gridBounds = emptyGridBounds();
     this.ready = false;
+    this.controls = new Map(
+      (collection.controls ?? []).map((c) => [keyForCoordinate(c.coordinate), c]),
+    );
+    this.signalCluster = clusterSignals(collection.controls ?? []);
+    this.turnRules = buildTurnRules(collection.restrictions ?? []);
 
     for (const feature of collection.features) {
       this.addLineFeature(feature);
@@ -182,7 +249,7 @@ export class OfflineGraphEngine {
   ): CalculatedRoute {
     const routes = this.calculateRoutes(start, end, options);
     if (routes.length === 0) {
-      throw new Error('No connecting road path found');
+      throw new NoRoadPathError('No connecting road path found');
     }
     return routes[0]!;
   }
@@ -201,18 +268,27 @@ export class OfflineGraphEngine {
     }
 
     const profile = options.profile ?? 'fastest';
+    const allowExpressways = options.allowExpressways ?? false;
     const want = Math.min(
       MAX_ALTERNATIVES,
       Math.max(1, options.alternatives ?? MAX_ALTERNATIVES),
     );
 
-    const startSnap = this.snapToNearestNode(start, ON_ROAD_SNAP_MAX_M);
+    const startSnap = this.snapToNearestNode(
+      start,
+      ON_ROAD_SNAP_MAX_M,
+      allowExpressways,
+    );
     if (!startSnap) {
-      throw new Error('Start is too far from the nearest road');
+      throw new NoRoadPathError('Start is too far from the nearest road');
     }
-    const endSnap = this.snapToNearestNode(end, ON_ROAD_SNAP_MAX_M);
+    const endSnap = this.snapToNearestNode(
+      end,
+      ON_ROAD_SNAP_MAX_M,
+      allowExpressways,
+    );
     if (!endSnap) {
-      throw new Error('Destination is too far from the nearest road');
+      throw new NoRoadPathError('Destination is too far from the nearest road');
     }
 
     const penalized = new Map<string, number>();
@@ -224,21 +300,21 @@ export class OfflineGraphEngine {
         startSnap.key,
         endSnap.key,
         profile,
+        allowExpressways,
         penalized,
       );
       if (!found) break;
 
-      const route = this.buildRouteFromKeys(
-        found.pathKeys,
-        found.edgeIds,
-        found.highways,
+      const route = this.buildRoute(
+        found,
         start,
         end,
         profile,
         accepted.length,
       );
+      const edgeIds = found.edges.map((edge) => edge.id);
 
-      const edgeSet = new Set(found.edgeIds);
+      const edgeSet = new Set(edgeIds);
       const tooSimilar = acceptedEdgeSets.some(
         (prev) => overlapRatio(prev, edgeSet) > MAX_OVERLAP_RATIO,
       );
@@ -252,43 +328,55 @@ export class OfflineGraphEngine {
       }
 
       // Penalize used edges so the next search finds a different corridor.
-      for (const edgeId of found.edgeIds) {
+      for (const edgeId of edgeIds) {
         penalized.set(edgeId, (penalized.get(edgeId) ?? 1) * USED_EDGE_PENALTY);
       }
     }
 
     if (accepted.length === 0) {
-      throw new Error(
-        'No connecting road path found (check one-way restrictions)',
+      throw new NoRoadPathError(
+        allowExpressways
+          ? 'No connecting road path found (check one-way restrictions)'
+          : 'No connecting road path found without expressways',
       );
     }
 
     return accepted;
   }
 
-  private buildRouteFromKeys(
-    pathKeys: string[],
-    edgeIds: string[],
-    highways: string[],
+  private buildRoute(
+    found: FoundPath,
     start: Coordinate,
     end: Coordinate,
     profile: RoutingProfileId,
     index: number,
   ): CalculatedRoute {
-    const coordinates = this.expandPathGeometry(pathKeys);
+    const coordinates: Coordinate[] = [
+      this.nodes.get(found.startKey)!.coordinate,
+    ];
+    let seconds = 0;
+    for (const edge of found.edges) {
+      for (let j = 1; j < edge.geometry.length; j++) {
+        coordinates.push(edge.geometry[j]!);
+      }
+      seconds += edge.seconds;
+    }
+
+    // Snapped-on stubs from the pin to the road ride at a crawl.
+    if (haversineMeters(start, coordinates[0]!) > 1) {
+      seconds += haversineMeters(start, coordinates[0]!) / 5;
+      coordinates.unshift(start);
+    }
+    const last = coordinates[coordinates.length - 1]!;
+    if (haversineMeters(end, last) > 1) {
+      seconds += haversineMeters(end, last) / 5;
+      coordinates.push(end);
+    }
     if (coordinates.length < 2) {
       throw new Error('Road route geometry is empty');
     }
 
-    if (haversineMeters(start, coordinates[0]!) > 1) {
-      coordinates.unshift(start);
-    }
-    if (haversineMeters(end, coordinates[coordinates.length - 1]!) > 1) {
-      coordinates.push(end);
-    }
-
     const distanceMeters = polylineLengthMeters(coordinates);
-    const durationSeconds = estimateDurationSeconds(distanceMeters, highways);
     const instructions = buildManeuversFromPath(coordinates);
 
     return {
@@ -297,9 +385,9 @@ export class OfflineGraphEngine {
       label: index === 0 ? 'Best match' : `Alternative ${index}`,
       coordinates,
       distanceMeters,
-      durationSeconds,
+      durationSeconds: Math.max(30, Math.round(seconds)),
       instructions,
-      meta: { edgeCount: edgeIds.length },
+      meta: { edgeCount: found.edges.length },
     };
   }
 
@@ -308,17 +396,19 @@ export class OfflineGraphEngine {
     const coords = feature.geometry.coordinates as Coordinate[];
     if (!Array.isArray(coords) || coords.length < 2) return;
 
-    const highway = feature.properties?.highway ?? 'road';
-    const oneway = String(feature.properties?.oneway ?? '').toLowerCase();
-    const impliedOneway =
-      oneway === '' &&
-      (highway === 'motorway' ||
-        highway === 'motorway_link' ||
-        highway === 'trunk_link');
-    const forwardOnly =
-      oneway === 'yes' || oneway === 'true' || oneway === '1' || impliedOneway;
-    const reverseOnly = oneway === '-1';
-    const osmId = feature.properties?.osm_id ?? 'x';
+    const props = feature.properties;
+    const highway = props?.highway ?? 'road';
+    const tags: RoadTags = { ...(props?.tags ?? {}) };
+    if (tags.oneway == null && props?.oneway != null) {
+      tags.oneway = String(props.oneway);
+    }
+    const road = roadAttributes(highway, tags);
+    if (road.access === 'no' || road.oneway === 'closed') return;
+
+    const forwardOnly = road.oneway === 'forward';
+    const reverseOnly = road.oneway === 'backward';
+    const wayId = props?.osm_id ?? -1;
+    const osmId = props?.osm_id ?? 'x';
 
     for (let i = 0; i < coords.length - 1; i++) {
       const a = coords[i]!;
@@ -335,33 +425,74 @@ export class OfflineGraphEngine {
       if (meters < 0.2) continue;
       const aKey = keyForCoordinate(a);
       const bKey = keyForCoordinate(b);
-      this.ensureNode(aKey, a);
-      this.ensureNode(bKey, b);
+      this.ensureNode(aKey, a, road.expressway);
+      this.ensureNode(bKey, b, road.expressway);
+
+      const edge = (
+        dir: 'fwd' | 'rev',
+        fromKey: string,
+        toKey: string,
+        geometry: Coordinate[],
+      ): GraphEdge => {
+        const delaySeconds = this.delayEntering(fromKey, toKey, dir === 'fwd');
+        return {
+          id: `${osmId}:${i}:${dir}`,
+          to: toKey,
+          wayId,
+          meters,
+          seconds: meters / road.speedMps + delaySeconds,
+          delaySeconds,
+          highway,
+          expressway: road.expressway,
+          destinationOnly: road.access === 'destination',
+          geometry,
+        };
+      };
 
       if (!reverseOnly) {
-        this.nodes.get(aKey)!.edges.push({
-          id: `${osmId}:${i}:fwd`,
-          to: bKey,
-          meters,
-          highway,
-          geometry: [a, b],
-        });
+        this.nodes.get(aKey)!.edges.push(edge('fwd', aKey, bKey, [a, b]));
       }
       if (!forwardOnly) {
-        this.nodes.get(bKey)!.edges.push({
-          id: `${osmId}:${i}:rev`,
-          to: aKey,
-          meters,
-          highway,
-          geometry: [b, a],
-        });
+        this.nodes.get(bKey)!.edges.push(edge('rev', bKey, aKey, [b, a]));
       }
     }
   }
 
-  private ensureNode(key: string, coordinate: Coordinate): void {
-    if (this.nodes.has(key)) return;
-    this.nodes.set(key, { coordinate, edges: [] });
+  /**
+   * Expected wait for an edge arriving at `toKey`. Charged once per signal
+   * cluster, so crossing a dual-carriageway junction counts one signal.
+   * Depends only on the edge, which keeps A* exact.
+   */
+  private delayEntering(
+    fromKey: string,
+    toKey: string,
+    forward: boolean,
+  ): number {
+    const control = this.controls.get(toKey);
+    if (!control) return 0;
+    if (control.direction && (control.direction === 'forward') !== forward) {
+      return 0;
+    }
+    if (control.kind === 'traffic_signals') {
+      const cluster = this.signalCluster.get(toKey);
+      if (cluster != null && this.signalCluster.get(fromKey) === cluster) {
+        return 0;
+      }
+    }
+    return CONTROL_DELAY_SECONDS[control.kind];
+  }
+
+  private ensureNode(
+    key: string,
+    coordinate: Coordinate,
+    expressway: boolean,
+  ): void {
+    const existing = this.nodes.get(key);
+    if (existing) {
+      if (!expressway) existing.ordinary = true;
+      return;
+    }
+    this.nodes.set(key, { coordinate, edges: [], ordinary: !expressway });
 
     const x = snapCell(coordinate[0]);
     const y = snapCell(coordinate[1]);
@@ -384,6 +515,7 @@ export class OfflineGraphEngine {
   private snapToNearestNode(
     point: Coordinate,
     maxMeters: number,
+    allowExpressways = true,
   ): { key: string; distanceMeters: number } | null {
     if (this.grid.size === 0) return null;
 
@@ -412,7 +544,9 @@ export class OfflineGraphEngine {
         const bucket = this.grid.get(cellKey(x, y));
         if (!bucket) continue;
         for (const key of bucket) {
-          const d = haversineMeters(point, this.nodes.get(key)!.coordinate);
+          const node = this.nodes.get(key)!;
+          if (!allowExpressways && !node.ordinary) continue;
+          const d = haversineMeters(point, node.coordinate);
           if (d < best) {
             best = d;
             bestKey = key;
@@ -424,14 +558,20 @@ export class OfflineGraphEngine {
     return { key: bestKey, distanceMeters: best };
   }
 
+  /**
+   * A* over search states. A state is a node key, except at turn-restriction
+   * via nodes, where it is `node|fromWay` so the allowed exits can depend on
+   * how the rider arrived.
+   */
   private aStar(
     startKey: string,
     endKey: string,
     profile: RoutingProfileId,
+    allowExpressways: boolean,
     penalized: Map<string, number>,
-  ): { pathKeys: string[]; edgeIds: string[]; highways: string[] } | null {
+  ): FoundPath | null {
     if (startKey === endKey) {
-      return { pathKeys: [startKey], edgeIds: [], highways: [] };
+      return { edges: [], startKey };
     }
 
     const endNode = this.nodes.get(endKey);
@@ -439,7 +579,7 @@ export class OfflineGraphEngine {
 
     // Straight-line distance times the cheapest possible cost per meter never
     // overestimates (and stays consistent, since edge lengths are haversine),
-    // so a node's first pop is its cheapest.
+    // so a state's first pop is its cheapest.
     const costScale = minCostPerMeter(profile);
     const heuristic = (coordinate: Coordinate) =>
       haversineMeters(coordinate, endNode.coordinate) * costScale;
@@ -453,29 +593,42 @@ export class OfflineGraphEngine {
 
     while (open.size > 0) {
       const current = open.pop()!.value;
-      // Stale heap entry: this node was already settled more cheaply.
+      // Stale heap entry: this state was already settled more cheaply.
       if (closed.has(current)) continue;
-      if (current === endKey) {
-        return this.reconstructPath(cameFrom, cameViaEdge, current);
+      const nodeKey = stateNode(current);
+      if (nodeKey === endKey) {
+        return this.reconstructPath(cameFrom, cameViaEdge, current, startKey);
       }
       closed.add(current);
 
-      const node = this.nodes.get(current);
+      const node = this.nodes.get(nodeKey);
       if (!node) continue;
       const gCurrent = gScore.get(current) ?? Infinity;
+      const arrivedOn = cameViaEdge.get(current)?.wayId;
+      const rule =
+        arrivedOn != null ? this.turnRules.get(nodeKey)?.get(arrivedOn) : undefined;
 
       for (const edge of node.edges) {
-        if (closed.has(edge.to)) continue;
+        if (edge.expressway && !allowExpressways) continue;
+        if (rule) {
+          if (rule.no.has(edge.wayId)) continue;
+          if (rule.only && !rule.only.has(edge.wayId)) continue;
+        }
+        const next = this.turnRules.get(edge.to)?.has(edge.wayId)
+          ? `${edge.to}|${edge.wayId}`
+          : edge.to;
+        if (closed.has(next)) continue;
         const neighbor = this.nodes.get(edge.to);
         if (!neighbor) continue;
-        const base = edgeCostMeters(edge.meters, edge.highway, profile);
+        let base = edgeCost(edge, profile);
+        if (edge.destinationOnly) base *= DESTINATION_ONLY_PENALTY;
         const penalty = penalized.get(edge.id) ?? 1;
         const tentative = gCurrent + base * penalty;
-        if (tentative >= (gScore.get(edge.to) ?? Infinity)) continue;
-        cameFrom.set(edge.to, current);
-        cameViaEdge.set(edge.to, edge);
-        gScore.set(edge.to, tentative);
-        open.push(edge.to, tentative + heuristic(neighbor.coordinate));
+        if (tentative >= (gScore.get(next) ?? Infinity)) continue;
+        cameFrom.set(next, current);
+        cameViaEdge.set(next, edge);
+        gScore.set(next, tentative);
+        open.push(next, tentative + heuristic(neighbor.coordinate));
       }
     }
 
@@ -486,47 +639,89 @@ export class OfflineGraphEngine {
     cameFrom: Map<string, string>,
     cameViaEdge: Map<string, GraphEdge>,
     current: string,
-  ): { pathKeys: string[]; edgeIds: string[]; highways: string[] } {
-    const pathKeys = [current];
-    const edgeIds: string[] = [];
-    const highways: string[] = [];
+    startKey: string,
+  ): FoundPath {
+    const edges: GraphEdge[] = [];
     while (cameFrom.has(current)) {
       const edge = cameViaEdge.get(current);
-      if (edge) {
-        edgeIds.unshift(edge.id);
-        highways.unshift(edge.highway);
-      }
+      if (edge) edges.push(edge);
       current = cameFrom.get(current)!;
-      pathKeys.unshift(current);
     }
-    return { pathKeys, edgeIds, highways };
+    edges.reverse();
+    return { edges, startKey };
   }
+}
 
-  private expandPathGeometry(pathKeys: string[]): Coordinate[] {
-    const coords: Coordinate[] = [];
-    for (let i = 0; i < pathKeys.length; i++) {
-      const key = pathKeys[i]!;
-      const node = this.nodes.get(key);
-      if (!node) continue;
+function stateNode(state: string): string {
+  const bar = state.indexOf('|');
+  return bar < 0 ? state : state.slice(0, bar);
+}
 
-      if (i === 0) {
-        coords.push(node.coordinate);
-        continue;
-      }
+/** Union nearby signal nodes into junction clusters (node key → cluster id). */
+function clusterSignals(controls: NetworkControl[]): Map<string, number> {
+  const signals = controls.filter((c) => c.kind === 'traffic_signals');
+  const parent = signals.map((_, i) => i);
+  const find = (i: number): number => {
+    while (parent[i] !== i) {
+      parent[i] = parent[parent[i]!]!;
+      i = parent[i]!;
+    }
+    return i;
+  };
 
-      const prevKey = pathKeys[i - 1]!;
-      const prev = this.nodes.get(prevKey);
-      const edge = prev?.edges.find((e) => e.to === key);
-      if (edge && edge.geometry.length > 1) {
-        for (let j = 1; j < edge.geometry.length; j++) {
-          coords.push(edge.geometry[j]!);
+  const cell = (c: Coordinate) =>
+    [Math.floor(c[0] / SIGNAL_CELL_DEG), Math.floor(c[1] / SIGNAL_CELL_DEG)] as const;
+  const buckets = new Map<string, number[]>();
+  signals.forEach((signal, i) => {
+    const [x, y] = cell(signal.coordinate);
+    const key = cellKey(x, y);
+    const bucket = buckets.get(key);
+    if (bucket) bucket.push(i);
+    else buckets.set(key, [i]);
+  });
+
+  signals.forEach((signal, i) => {
+    const [x, y] = cell(signal.coordinate);
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (const j of buckets.get(cellKey(x + dx, y + dy)) ?? []) {
+          if (j <= i) continue;
+          if (
+            haversineMeters(signal.coordinate, signals[j]!.coordinate) <=
+            SIGNAL_CLUSTER_M
+          ) {
+            parent[find(i)] = find(j);
+          }
         }
-      } else {
-        coords.push(node.coordinate);
       }
     }
-    return coords;
+  });
+
+  return new Map(
+    signals.map((signal, i) => [keyForCoordinate(signal.coordinate), find(i)]),
+  );
+}
+
+function buildTurnRules(
+  restrictions: NetworkRestriction[],
+): Map<string, Map<number, TurnRule>> {
+  const rules = new Map<string, Map<number, TurnRule>>();
+  for (const r of restrictions) {
+    const viaKey = keyForCoordinate(r.via);
+    let byWay = rules.get(viaKey);
+    if (!byWay) {
+      byWay = new Map();
+      rules.set(viaKey, byWay);
+    }
+    let rule = byWay.get(r.fromWay);
+    if (!rule) {
+      rule = { no: new Set(), only: null };
+      byWay.set(r.fromWay, rule);
+    }
+    if (r.kind === 'no') rule.no.add(r.toWay);
+    else (rule.only ??= new Set()).add(r.toWay);
   }
+  return rules;
 }
 
 function emptyGridBounds() {

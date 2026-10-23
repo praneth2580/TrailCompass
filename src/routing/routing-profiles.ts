@@ -68,31 +68,39 @@ export function highwaySpeedMps(highway: string): number {
   }
 }
 
+/** Fastest any edge can be after maxspeed / lane boosts (~108 km/h). */
+export const MAX_SPEED_MPS = 30;
+
+/** What the cost function needs to know about one directed graph edge. */
+export interface CostedEdge {
+  meters: number;
+  /** Ride time including `delaySeconds`. */
+  seconds: number;
+  /** Expected wait at a signal, stop sign, level crossing or toll booth. */
+  delaySeconds: number;
+  highway: string;
+}
+
 /**
  * Edge cost for A*. Lower is better.
- * Penalties for less_traffic push the search onto quieter classes.
+ * "fastest" is ride time (incl. signal waits); "less_traffic" pushes the
+ * search onto quieter classes and away from signalled junctions.
  */
-export function edgeCostMeters(
-  meters: number,
-  highway: string,
-  profile: RoutingProfileId,
-): number {
-  if (meters <= 0) return 0;
+export function edgeCost(edge: CostedEdge, profile: RoutingProfileId): number {
+  if (edge.meters <= 0 && edge.delaySeconds <= 0) return 0;
 
   switch (profile) {
     case 'shortest':
-      return meters;
-    case 'fastest': {
-      const speed = Math.max(3, highwaySpeedMps(highway));
+      return edge.meters;
+    case 'fastest':
       // Cost ≈ time in seconds, scaled to meter-ish magnitude.
-      return (meters / speed) * 10;
-    }
-    case 'less_traffic': {
-      const classPenalty = quietClassPenalty(highway);
-      return meters * classPenalty;
-    }
+      return edge.seconds * 10;
+    case 'less_traffic':
+      return (
+        edge.meters * quietClassPenalty(edge.highway) + edge.delaySeconds * 10
+      );
     default:
-      return meters;
+      return edge.meters;
   }
 }
 
@@ -115,23 +123,42 @@ const COSTED_HIGHWAY_CLASSES = [
   'road',
 ];
 
-const minCostCache = new Map<RoutingProfileId, number>();
-
 /**
  * Cheapest cost any edge can have per meter under `profile`. Scaling the
  * straight-line A* heuristic by this keeps it from overestimating, so the
  * search still returns the cheapest path.
  */
 export function minCostPerMeter(profile: RoutingProfileId): number {
-  const cached = minCostCache.get(profile);
-  if (cached != null) return cached;
-  const min = Math.min(
-    ...COSTED_HIGHWAY_CLASSES.map((highway) =>
-      edgeCostMeters(1, highway, profile),
-    ),
-  );
-  minCostCache.set(profile, min);
-  return min;
+  switch (profile) {
+    case 'fastest':
+      return 10 / MAX_SPEED_MPS;
+    case 'less_traffic':
+      return Math.min(...COSTED_HIGHWAY_CLASSES.map(quietClassPenalty));
+    default:
+      return 1;
+  }
+}
+
+const PREFS_ALLOW_EXPRESSWAYS = 'tc.allowExpressways';
+
+/**
+ * Whether two-wheelers may use motorways / expressways not explicitly
+ * tagged for them. Off by default: most Indian expressways ban bikes.
+ */
+export function loadAllowExpressways(): boolean {
+  try {
+    return localStorage.getItem(PREFS_ALLOW_EXPRESSWAYS) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function saveAllowExpressways(allow: boolean): void {
+  try {
+    localStorage.setItem(PREFS_ALLOW_EXPRESSWAYS, allow ? '1' : '0');
+  } catch {
+    // ignore
+  }
 }
 
 function quietClassPenalty(highway: string): number {
@@ -160,18 +187,4 @@ function quietClassPenalty(highway: string): number {
     default:
       return 1.2;
   }
-}
-
-export function estimateDurationSeconds(
-  meters: number,
-  highwaySamples: string[],
-): number {
-  if (highwaySamples.length === 0) {
-    return Math.max(30, Math.round(meters / 11));
-  }
-  // Average speed across sampled classes along the path.
-  let speedSum = 0;
-  for (const h of highwaySamples) speedSum += highwaySpeedMps(h);
-  const avg = Math.max(4, speedSum / highwaySamples.length);
-  return Math.max(30, Math.round(meters / avg));
 }

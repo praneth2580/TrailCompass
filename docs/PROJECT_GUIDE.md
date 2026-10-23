@@ -419,9 +419,11 @@ State: `{ destination: TripStop | null, stops: TripStop[], mapPick: MapPickReque
 
 Saves OSM road extracts so later plans can skip Overpass.
 
-- **Index:** Preferences key `road-pack-index` (array of IDs, newest first). **Metadata:** `road-pack-meta:<id>`. **Body:** `road-packs/<id>.json`, written through `storageManager`.
-- `findCoveringPack(points)` returns the first pack whose bounding box contains every point (with about 0.002° of padding) **and** whose recorded `coverage` has roads there. A corridor pack only counts if every point is within 80 % of the corridor radius of one of its sample points (`routing/network-coverage.ts`). Packs saved before coverage was recorded are treated as full-bbox packs.
-- `saveFromCollection` is called after every new Overpass download. It skips collections over about 7.2 M characters and keeps at most **40 packs** (the oldest are deleted).
+- **Index:** Preferences key `road-pack-index` for corridor packs and `road-pack-index-backbone` for backbone tiles and connector areas (arrays of IDs, newest first). **Metadata:** `road-pack-meta:<id>`. **Body:** `road-packs/<id>.json`, written through `storageManager`.
+- **Kinds:** `corridor` packs hold every road class across their area. `backbone` tiles (major roads only) and `connector` areas (full detail only near the centre) are reused only by exact `cacheKey` (`findByCacheKey`).
+- **Schema:** packs record `schema: 2` (way tags, junction controls and turn restrictions). Older packs are ignored, so they are downloaded again.
+- `findCoveringPack(points)` returns the first current-schema `corridor` pack whose bounding box contains every point (with about 0.002° of padding) **and** whose recorded `coverage` has roads there. A corridor pack only counts if every point is within 80 % of the corridor radius of one of its sample points (`routing/network-coverage.ts`).
+- `saveFromCollection` is called after every new Overpass download. It skips collections over about 7.2 M characters and keeps at most **40 corridor packs** and **60 backbone/connector packs** (the oldest are deleted).
 - The label looks like `Roads · 48.86°, 2.30° · ~12 km · 834 ways`.
 
 ### 7.8 `place-search.service.ts` — Nominatim
@@ -463,16 +465,23 @@ NavigationService.planRoute
 OfflineRoutingAdapter.calculateRoutes      (offline-adapter.ts)
    ├─ Valhalla ready? ──▶ ValhallaOfflineAdapter.calculateRoute   (valhalla-adapter.ts)
    │
-   ├─ needsRouteChunking? (any hop > 55 km OR any waypoint)
-   │     └─▶ calculateChainedRoute
-   │            expandRouteChain  (route-chunking.ts)
-   │            per leg: loadOsmNetworkForRoute ─▶ OfflineGraphEngine.calculateRoute
-   │            mergeRoutes
+   ├─ single hop ≤ 55 km, no waypoints:
+   │     calculateDirectRoutes
+   │        ensureRoadGraph ─▶ loadOsmNetworkForRoute   (osm-network-loader.ts)
+   │        snapRoutingEndpoints
+   │        OfflineGraphEngine.calculateRoutes (≤ 3 alternatives)      (graph-engine.ts)
    │
-   └─ single hop:
-         ensureRoadGraph ─▶ loadOsmNetworkForRoute   (osm-network-loader.ts)
-         snapRoutingEndpoints
-         OfflineGraphEngine.calculateRoutes (≤ 3 alternatives)      (graph-engine.ts)
+   ├─ waypoints, every hop ≤ 55 km:
+   │     calculateChainedRoute — stop to stop, one corridor per hop, mergeRoutes
+   │
+   └─ any hop > 55 km, or either path above hit NoRoadPathError:
+         calculateTwoPassRoute
+            pass 1: loadBackboneNetwork (backbone-loader.ts) + loadLocalArea per stop
+                    ─▶ A* per user leg on major roads
+            pass 2: splitPolyline(backbone path, 50 km)
+                    per slice: loadOsmNetworkForRoute({ guide }) + clipped backbone ─▶ A*
+                    (a slice that fails keeps its backbone path)
+            mergeRoutes
 
 loadOsmNetworkForRoute:
    memory cache ─▶ road pack on disk ─▶ Overpass (via overpassScheduler) ─▶ save road pack
@@ -487,7 +496,7 @@ interface CalculatedRoute {
   coordinates; distanceMeters; durationSeconds; instructions;
   id?; profile?; label?; meta?: { edgeCount? }
 }
-interface RouteRequestOptions { waypoints?; profile?; alternatives?; signal? }
+interface RouteRequestOptions { waypoints?; profile?; alternatives?; allowExpressways?; signal? }
 interface RoutingAdapter {
   calculateRoute(start, end, waypointsOrOptions?): Promise<CalculatedRoute>;
   calculateRoutes?(start, end, options?): Promise<CalculatedRoute[]>;
@@ -505,39 +514,48 @@ It re-exports `offlineRoutingAdapter` as `defaultRoutingAdapter`. `NavigationSer
 2. If the file exists and Valhalla starts, the engine kind is `valhalla`.
 3. Otherwise, it loads the bundled **demo network** (Paris Trocadéro, 107 ways) into the graph engine. This is optional; failure is ignored. The kind is then `graph`, and the engine is ready.
 
-**`calculateRoutes(start, end, {waypoints, profile, alternatives = 3, signal})`**
+**`calculateRoutes(start, end, {waypoints, profile, alternatives = 3, allowExpressways = false, signal})`**
 - **Valhalla path:** one route, labelled "Best match".
-- **Chained path:** used when `needsRouteChunking` is true: any hop is longer than 55 km, **or there are any waypoints**. Returns one merged route.
-- **Single-hop path:** `ensureRoadGraph` (download only if the current graph does not already cover both points within 350 m), then snap both ends to the nearest road (within 2.5 km), then the graph engine returns up to 3 alternatives.
+- **Direct path:** a single hop of 55 km or less with no waypoints. `ensureRoadGraph` (download only if the current graph does not already cover both points within 350 m), then snap both ends to the nearest road (within 2.5 km), then the graph engine returns up to 3 alternatives.
+- **Chained path:** waypoints where every hop is 55 km or less. Returns one merged route.
+- **Two-pass path:** any hop over 55 km, or when the direct or chained path throws `NoRoadPathError` (the road left the small download). Returns one merged route.
 - Progress events go to `subscribeProgress` listeners. 400 ms after a job finishes, it emits `idle`, but only if no newer job has started (`jobEpoch`).
 
 **Chained routing (`calculateChainedRoute`)**
-1. `expandRouteChain` builds `start → [synthetic vias] → waypoint → … → end`, with each hop ≤ 55 km. Synthetic vias are points on the great circle between two user points.
+1. The chain is `start → waypoint → … → end`; there are no synthetic vias.
 2. **Prefetching:** legs 1 and 2 start downloading at once. While leg *i* is being routed, leg *i + 1* is already downloading. This keeps the Overpass mirror busy during the A\* search.
 3. For each leg:
    - `loadPrefetchedCorridor`: if the current graph already covers the leg, use it. Otherwise wait for the prefetched download. If the previous leg's snapped end (the cursor) is not where the prefetch started, and the prefetched corridor does not reach the cursor, download again from the cursor.
-   - Snap both ends, allowing up to **12 km** for synthetic vias (so they can move onto a real road) and **2.5 km** for user points.
-   - Run the graph engine for the best route only. The next leg starts at this leg's **snapped** end.
+   - Snap both ends (within 2.5 km) and run the graph engine for the best route only. The next leg starts at this leg's **snapped** end.
 4. `mergeRoutes` joins the coordinates (dropping a duplicate joint point) and sums the instructions, distance and duration.
 
-> Note: `offlineGraphEngine.loadFeatureCollection` **replaces** the graph each time. Only one leg's corridor is in memory at any moment.
+**Two-pass routing (`calculateTwoPassRoute`)**
+
+The straight line between two far-apart places often crosses water or hills that the real road goes around. For example, Goregaon → Ganpatipule crosses Mumbai harbour and the Konkan creeks, while NH66 runs ~30 km inland. So the route is found in two passes:
+1. **Backbone pass (`routeOnBackbone`):** load `motorway | trunk | primary` (+ links) in 0.5° tiles within `backboneRadiusMeters` of the trip (20 % of its length, 20–60 km). Also load `loadLocalArea` around every stop: every class within 6 km, plus secondary/tertiary within 20 km, so a small town reaches the highways. Merge everything and run A\* per user leg. If a leg finds no path, the radius is doubled once.
+2. **Refine pass:** cut each backbone leg into ~50 km slices at path vertices (`splitPolyline`). For each slice, download full detail along it (`loadOsmNetworkForRoute` with `guide`), merge it with the backbone clipped to the slice (+5 km), and run A\*. The next slice's download starts while the current one is routed.
+3. **Fallback:** a slice whose detail download or search fails keeps its backbone path. Once pass 1 succeeds, the trip always gets a route.
+
+> Note: `offlineGraphEngine.loadFeatureCollection` **replaces** the graph each time. `mergeNetworks` (osm-network-loader.ts) combines downloads first, keeping each OSM way once.
 
 ### 8.3 `osm-network-loader.ts` — downloading road data
 
-`loadOsmNetworkForRoute(start, end, waypoints, onProgress, signal)`
+`loadOsmNetworkForRoute(start, end, waypoints, onProgress, signal, { guide? })`
 
-1. **Size limit:** throws if any two points are more than **80 km** apart. Chaining keeps legs at or below 55 km.
+1. **Size limit:** without a `guide`, throws if any two points are more than **80 km** apart.
 2. **Query shape:**
    - Span < 25 km: a **bounding-box** query (points' bbox + 0.025° padding).
    - Span ≥ 25 km: a **corridor** query, made of `around:4000` circles at sample points every 12 km along the great circle (at most 12 circles). This avoids downloading a huge diagonal box for a long thin leg.
+   - With a `guide` (a known road path from the backbone pass): `around:3000` circles every 4 km **along the path** (at most 20).
    - Road classes: `motorway` to `service`, plus `*_link`, excluding `area=yes`.
+   - Every query (`buildNetworkQuery`) also returns the junction controls on those ways (`traffic_signals`, `stop`, `give_way`, `railway=level_crossing`, `barrier=toll_booth`) and via-node turn restrictions (`rel(bw)[type=restriction]`). Ways use `out tags geom` to keep the response small.
 3. **Cache layers:** an in-memory `Map` (24 entries; the key is the bbox or the corridor points), then `roadPackService.findCoveringPack` (disk), then Overpass.
-4. **`fetchOverpass`** (in `overpass-client.ts`, shared with the POI search): up to 4 attempts, alternating between `overpass-api.de` and `overpass.kumi.systems`. Each attempt first gets a slot from `overpassScheduler`.
+4. **`fetchOverpass`** (in `overpass-client.ts`, shared with the POI search): up to 6 attempts, rotating through `overpass-api.de`, `overpass.kumi.systems` and `maps.mail.ru`. Each attempt first gets a slot from `overpassScheduler`, and is abandoned (and the next mirror tried) if it hasn't finished 15 s after the query's own `[timeout:N]`.
    - HTTP 429, 502, 503 or 504: marks the mirror as overloaded and waits for `Retry-After` (at most 30 s) or the backoff.
    - Other HTTP errors, bad JSON, or network errors: back off and switch mirror.
    - Backoff: 2 s, 4 s, 8 s (maximum 8 s). The wait can be aborted.
 5. **Download progress:** if `Content-Length` is present, the body is read as a stream and real byte progress is reported. Otherwise the progress is indeterminate.
-6. **Conversion (`overpassToNetwork`):** ways with geometry become GeoJSON `LineString` features with `highway`, `oneway`, `name` and `osm_id`. Ways tagged `access=no` or `private`, `motor_vehicle=no` or `motorcycle=no` are dropped. The collection's `region.coverage` records what was really downloaded: `{kind: 'bbox'}`, or `{kind: 'corridor', samples, radiusMeters}` for corridor queries.
+6. **Conversion (`overpassToNetwork`):** ways with geometry become GeoJSON `LineString` features with `highway`, `oneway`, `name`, `osm_id` and a `tags` subset (`ROAD_TAG_KEYS` in `road-attributes.ts`: lanes, maxspeed, surface, access keys, junction, …). Control nodes become `controls`, and restriction relations become `restrictions`. Access rules are applied by the graph engine, not here. The collection's `region.coverage` records what was really downloaded: `{kind: 'bbox'}`, or `{kind: 'corridor', samples, radiusMeters}` for corridor queries.
 7. The result is cached and saved as a road pack in the background.
 
 ### 8.4 `overpass-scheduler.ts` — limiting concurrent requests (uncommitted)
@@ -562,36 +580,42 @@ These are used throughout the loader, the adapter and the navigation service, so
 
 **Building the graph (`loadFeatureCollection`)**
 - Each consecutive coordinate pair in a `LineString` becomes an edge. Nodes are keyed by the coordinate rounded to 6 decimal places (`keyForCoordinate`), so ways that share an OSM node connect automatically.
-- One-way handling: `oneway=yes|true|1` creates only the forward edge. `oneway=-1` creates only the reverse edge. `motorway`, `motorway_link` and `trunk_link` are treated as one-way when they have no tag.
-- Edge IDs are `${osm_id}:${segmentIndex}:fwd|rev`.
+- Way tags are read by `roadAttributes` (`road-attributes.ts`):
+  - **Access** for two-wheelers, most specific first: `motorcycle` > `motor_vehicle` > `vehicle` > `access`. `no`, `private`, `agricultural`, … drop the way; `destination` / `customers` make its edges cost ×5 (fine to start or end on, avoided as a through route).
+  - **One-way:** `oneway:motorcycle` overrides `oneway`. `oneway=yes|true|1` creates only the forward edge and `oneway=-1` only the reverse edge. Roundabouts (`junction=roundabout|circular`), `motorway`, `motorway_link` and `trunk_link` are one-way when they have no tag. `reversible` / `alternating` ways are dropped.
+  - **Expressway:** `motorway`, `motorway_link`, `motorroad=yes` or `expressway=yes`, unless `motorcycle=yes`. The search skips these edges unless `allowExpressways` is set (the rider's "Expressways" toggle, off by default), and snapping skips nodes that only expressways touch.
+  - **Speed:** class speed (§8.7), then a numeric `maxspeed` → `min(limit × 0.9, class × 1.2)`; 3+ lanes per direction ×1.15, 2 ×1.05, a single-lane two-way road ×0.75; unpaved ×0.55; bad smoothness ×0.7. Clamped to 3–30 m/s.
+- **Junction delays** are added to the time of edges *entering* a control node: signals 25 s, stop 8 s, give way 4 s, level crossing 25 s, toll booth 15 s. `traffic_signals:direction` / `direction` limit a control to one direction. Signals within 50 m of each other are one cluster, and an edge only pays when it enters a cluster from outside it, so a dual-carriageway junction counts once.
+- Each edge stores `meters`, `seconds` (ride time + delay), `delaySeconds`, `wayId`, `expressway` and `destinationOnly`. Edge IDs are `${osm_id}:${segmentIndex}:fwd|rev`.
 
 **Snapping:** nodes are also bucketed in a grid of 0.005° cells. `snapToNearestNode(point, maxMeters)` searches rings of cells outward from the point's cell and stops once no farther ring can hold a closer node, or the ring is beyond `maxMeters`. `coversPoints` requires both ends to be within 350 m of a road. `nearestRoadCoordinate(point, max)` is used for the wider 2.5 km and 12 km snaps.
 
 **Search (`aStar`)**
 - The heuristic is the straight-line distance to the goal multiplied by `minCostPerMeter(profile)`, the cheapest cost any edge can have per metre under that profile. This never overestimates, so the first route found is the cheapest. Without the scaling, "fastest" could settle on a slow street over a cheaper motorway.
-- The open set is a binary min-heap (`min-heap.ts`). A node can be pushed again with a better score; outdated entries are skipped when popped, and settled nodes are kept in a closed set.
-- The edge cost comes from `edgeCostMeters(meters, highway, profile)` multiplied by any penalty on that edge.
+- The open set is a binary min-heap (`min-heap.ts`). A state can be pushed again with a better score; outdated entries are skipped when popped, and settled states are kept in a closed set.
+- **Turn restrictions:** a search state is a node key, except at via nodes of a restriction, where it is `node|fromWay`. From such a state a `no_*` rule removes the exit onto the `to` way and an `only_*` rule keeps only that exit. `restriction:motorcycle` beats `restriction`, and restrictions with `except=motorcycle` are ignored.
+- The edge cost comes from `edgeCost(edge, profile)`, multiplied by any alternative penalty on that edge.
 
 **Alternatives (`calculateRoutes`)**
 1. Run A\*. Add the result if it does not overlap any accepted route by more than 72 % of its edges (measured against the smaller set), and is not more than 1.55× the best route's length.
 2. Multiply the cost of every edge just used by 6, and search again.
 3. Repeat up to `want × 3` times or until `want` routes (at most 3) are accepted.
 
-**Building the result:** expands the path into coordinates, adds the original start and end points if they are more than 1 m from the snapped nodes, measures the length, estimates the duration (`estimateDurationSeconds`), and generates instructions (`buildManeuversFromPath`). Labels are "Best match", "Alternative 1", and so on.
+**Building the result:** expands the path's edges into coordinates, adds the original start and end points if they are more than 1 m from the snapped nodes (ridden at 5 m/s), measures the length, sums edge `seconds` for the duration, and generates instructions (`buildManeuversFromPath`). Labels are "Best match", "Alternative 1", and so on. Failures to connect throw `NoRoadPathError`.
 
 ### 8.7 `routing-profiles.ts` — route types and costs
 
 | Profile | Edge cost |
 |---|---|
 | `shortest` | metres |
-| `fastest` | `(metres / speed(highway)) × 10`, i.e. time scaled up |
-| `less_traffic` | `metres × penalty(highway)`: motorway 4.5, trunk 3.2, primary 2.2, secondary 1.4, tertiary 1.05, residential, living street and unclassified 0.85, service 1.1 |
+| `fastest` | `edge seconds × 10` (ride time including junction delays, scaled up) |
+| `less_traffic` | `metres × penalty(highway) + delaySeconds × 10`: motorway 4.5, trunk 3.2, primary 2.2, secondary 1.4, tertiary 1.05, residential, living street and unclassified 0.85, service 1.1 |
 
-Assumed motorcycle speeds (m/s): motorway 28 (about 100 km/h), trunk 22, primary 16, secondary 13, tertiary 11, residential and unclassified 9, living street 6, service 5, anything else 10.
+Base motorcycle speeds by class (m/s), before the tag adjustments in §8.6: motorway 28 (about 100 km/h), trunk 22, primary 16, secondary 13, tertiary 11, residential and unclassified 9, living street 6, service 5, anything else 10. `MAX_SPEED_MPS` (30) caps every edge, and `minCostPerMeter('fastest')` is `10 / 30`.
 
-`estimateDurationSeconds` divides the length by the **average** assumed speed of the road classes used on the path (minimum 30 s).
+`loadAllowExpressways` / `saveAllowExpressways` keep the "Expressways" toggle in `localStorage` (`tc.allowExpressways`, default off).
 
-"Less traffic" is a guess based on road class. It does **not** use live traffic data.
+"Less traffic" and the signal delays are estimates based on road class and OSM tags. They do **not** use live traffic data.
 
 ### 8.8 `maneuver-builder.ts` — instructions from geometry
 

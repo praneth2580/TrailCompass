@@ -9,11 +9,23 @@ import { appDatabase } from '../database/database';
 import { storageManager } from '../offline/storage-manager';
 
 const INDEX_KEY = 'road-pack-index';
+const BACKBONE_INDEX_KEY = 'road-pack-index-backbone';
 const PACK_DIR = 'road-packs';
+/** Bump when the stored network format gains data routing depends on. */
+const PACK_SCHEMA = 2;
+const MAX_CORRIDOR_PACKS = 40;
+const MAX_BACKBONE_PACKS = 60;
 /** Skip persisting huge extracts on web localStorage. */
 const MAX_WEB_JSON_CHARS = 1_800_000;
 
 export type BBox = [west: number, south: number, east: number, north: number];
+
+/**
+ * Corridor/area packs have every road class everywhere and are reused by
+ * coverage. Backbone tiles and connector areas hold only some classes in
+ * parts of their box, so they are reused by exact cache key only.
+ */
+export type RoadPackKind = 'corridor' | 'backbone' | 'connector';
 
 export interface RoadPackMeta {
   id: string;
@@ -26,6 +38,9 @@ export interface RoadPackMeta {
   cacheKey?: string;
   /** Where the pack really has roads; absent on packs saved before this existed. */
   coverage?: NetworkCoverage;
+  /** Format version; packs without tags / junction controls have none. */
+  schema?: number;
+  kind?: RoadPackKind;
 }
 
 /**
@@ -34,7 +49,10 @@ export interface RoadPackMeta {
  */
 export class RoadPackService {
   async listPacks(): Promise<RoadPackMeta[]> {
-    const ids = (await appDatabase.getJson<string[]>(INDEX_KEY)) ?? [];
+    const ids = [
+      ...((await appDatabase.getJson<string[]>(INDEX_KEY)) ?? []),
+      ...((await appDatabase.getJson<string[]>(BACKBONE_INDEX_KEY)) ?? []),
+    ];
     const packs: RoadPackMeta[] = [];
     for (const id of ids) {
       const meta = await appDatabase.getJson<RoadPackMeta>(`road-pack-meta:${id}`);
@@ -69,6 +87,7 @@ export class RoadPackService {
     if (points.length === 0) return null;
     const packs = await this.listPacks();
     for (const meta of packs) {
+      if (!isCurrent(meta) || (meta.kind ?? 'corridor') !== 'corridor') continue;
       if (!bboxCoversPoints(meta.bbox, points, 0.002)) continue;
       if (!coverageIncludesPoints(meta.coverage, points)) continue;
       const loaded = await this.getPack(meta.id);
@@ -77,10 +96,21 @@ export class RoadPackService {
     return null;
   }
 
+  /** A current-format pack saved under `cacheKey` (e.g. a backbone tile). */
+  async findByCacheKey(cacheKey: string): Promise<{
+    meta: RoadPackMeta;
+    collection: NetworkFeatureCollection;
+  } | null> {
+    const packs = await this.listPacks();
+    const meta = packs.find((m) => m.cacheKey === cacheKey && isCurrent(m));
+    return meta ? this.getPack(meta.id) : null;
+  }
+
   async saveFromCollection(
     collection: NetworkFeatureCollection,
-    options?: { cacheKey?: string; label?: string },
+    options?: { cacheKey?: string; label?: string; kind?: RoadPackKind },
   ): Promise<RoadPackMeta | null> {
+    const kind = options?.kind ?? 'corridor';
     const bbox = collection.region?.bbox;
     if (!bbox || collection.features.length === 0) return null;
 
@@ -101,19 +131,22 @@ export class RoadPackService {
       bytes: json.length,
       cacheKey: options?.cacheKey,
       coverage: collection.region?.coverage,
+      schema: PACK_SCHEMA,
+      kind,
     };
 
     await storageManager.writeTextFile(`${PACK_DIR}/${id}.json`, json);
     await appDatabase.setJson(`road-pack-meta:${id}`, meta);
-    const ids = (await appDatabase.getJson<string[]>(INDEX_KEY)) ?? [];
+    const keyed = kind !== 'corridor';
+    const indexKey = keyed ? BACKBONE_INDEX_KEY : INDEX_KEY;
+    const cap = keyed ? MAX_BACKBONE_PACKS : MAX_CORRIDOR_PACKS;
+    const ids = (await appDatabase.getJson<string[]>(indexKey)) ?? [];
     if (!ids.includes(id)) {
       ids.unshift(id);
       // Cap stored packs so devices don't fill up.
-      while (ids.length > 40) {
-        const drop = ids.pop();
-        if (drop) await this.deletePack(drop);
-      }
-      await appDatabase.setJson(INDEX_KEY, ids);
+      const dropped = ids.splice(cap);
+      await appDatabase.setJson(indexKey, ids);
+      for (const drop of dropped) await this.deletePack(drop);
     }
     return meta;
   }
@@ -121,21 +154,30 @@ export class RoadPackService {
   async deletePack(id: string): Promise<void> {
     await storageManager.deleteFile(`${PACK_DIR}/${id}.json`);
     await appDatabase.remove(`road-pack-meta:${id}`);
-    const ids = (await appDatabase.getJson<string[]>(INDEX_KEY)) ?? [];
-    await appDatabase.setJson(
-      INDEX_KEY,
-      ids.filter((x) => x !== id),
-    );
+    for (const indexKey of [INDEX_KEY, BACKBONE_INDEX_KEY]) {
+      const ids = (await appDatabase.getJson<string[]>(indexKey)) ?? [];
+      if (!ids.includes(id)) continue;
+      await appDatabase.setJson(
+        indexKey,
+        ids.filter((x) => x !== id),
+      );
+    }
   }
 
   async deleteAll(): Promise<void> {
-    const ids = (await appDatabase.getJson<string[]>(INDEX_KEY)) ?? [];
-    for (const id of ids) {
-      await storageManager.deleteFile(`${PACK_DIR}/${id}.json`);
-      await appDatabase.remove(`road-pack-meta:${id}`);
+    for (const indexKey of [INDEX_KEY, BACKBONE_INDEX_KEY]) {
+      const ids = (await appDatabase.getJson<string[]>(indexKey)) ?? [];
+      for (const id of ids) {
+        await storageManager.deleteFile(`${PACK_DIR}/${id}.json`);
+        await appDatabase.remove(`road-pack-meta:${id}`);
+      }
+      await appDatabase.setJson(indexKey, []);
     }
-    await appDatabase.setJson(INDEX_KEY, []);
   }
+}
+
+function isCurrent(meta: RoadPackMeta): boolean {
+  return (meta.schema ?? 1) >= PACK_SCHEMA;
 }
 
 function labelForBbox(bbox: BBox, featureCount: number): string {

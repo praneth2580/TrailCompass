@@ -19,7 +19,11 @@ import { remainingFromProjectionMeters } from '../routing/geo';
 import { mapService } from './map.service';
 import { offlineRoutingAdapter } from '../routing/offline-adapter';
 import type { RoutingProgress } from '../routing/routing-progress';
-import type { RoutingProfileId } from '../routing/routing-profiles';
+import {
+  loadAllowExpressways,
+  saveAllowExpressways,
+  type RoutingProfileId,
+} from '../routing/routing-profiles';
 import {
   calculatedToSavedRoute,
   savedToCalculatedRoute,
@@ -68,6 +72,7 @@ export class NavigationService {
   private listeners = new Set<NavigationListener>();
   private engineReady = false;
   private profile: RoutingProfileId = 'fastest';
+  private allowExpressways = loadAllowExpressways();
   /** Bumped whenever a plan or reroute is replaced or cancelled. */
   private planToken = 0;
   private planAbort: AbortController | null = null;
@@ -190,6 +195,16 @@ export class NavigationService {
   setProfile(profile: RoutingProfileId): void {
     this.profile = profile;
     this.setState({ ...this.state, profile });
+  }
+
+  getAllowExpressways(): boolean {
+    return this.allowExpressways;
+  }
+
+  /** Takes effect on the next plan / reroute (callers re-plan). */
+  setAllowExpressways(allow: boolean): void {
+    this.allowExpressways = allow;
+    saveAllowExpressways(allow);
   }
 
   selectAlternative(index: number): void {
@@ -376,6 +391,7 @@ export class NavigationService {
       const options = {
         waypoints: this.waypoints,
         profile: this.profile,
+        allowExpressways: this.allowExpressways,
         alternatives: this.waypoints.length > 0 ? 1 : 3,
         signal,
       };
@@ -624,6 +640,7 @@ export class NavigationService {
       const remainingWaypoints = this.waypoints;
       const options = {
         profile: this.profile,
+        allowExpressways: this.allowExpressways,
         alternatives: remainingWaypoints.length > 0 ? 1 : 3,
         waypoints: remainingWaypoints,
         signal,

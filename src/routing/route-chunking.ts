@@ -4,38 +4,35 @@ import { haversineMeters, toRad } from './geo';
 /** Target max length per OSM download + A* leg (keep under Overpass limit). */
 export const ROUTE_CHUNK_MAX_M = 55_000;
 
-export interface RouteChainPoint {
-  coordinate: Coordinate;
-  /** Auto-inserted for long-distance chunking — may be snapped onto roads. */
-  synthetic: boolean;
-}
-
 /**
- * Expand start → waypoints → end with geodesic vias so consecutive hops
- * stay under `maxChunkMeters`. User waypoints are never dropped.
+ * Cut a road path into consecutive slices of about `maxMeters`. Slices end
+ * on path vertices (real graph nodes) and share their boundary vertex.
  */
-export function expandRouteChain(
-  start: Coordinate,
-  end: Coordinate,
-  waypoints: Coordinate[] = [],
-  maxChunkMeters = ROUTE_CHUNK_MAX_M,
-): RouteChainPoint[] {
-  const anchors: RouteChainPoint[] = [
-    { coordinate: start, synthetic: false },
-    ...waypoints.map((coordinate) => ({ coordinate, synthetic: false })),
-    { coordinate: end, synthetic: false },
-  ];
-
-  const chain: RouteChainPoint[] = [anchors[0]!];
-  for (let i = 1; i < anchors.length; i++) {
-    const from = anchors[i - 1]!.coordinate;
-    const to = anchors[i]!;
-    for (const via of splitSegment(from, to.coordinate, maxChunkMeters)) {
-      chain.push({ coordinate: via, synthetic: true });
+export function splitPolyline(
+  coords: Coordinate[],
+  maxMeters: number,
+): Coordinate[][] {
+  if (coords.length < 2) return [coords];
+  const slices: Coordinate[][] = [];
+  let current: Coordinate[] = [coords[0]!];
+  let walked = 0;
+  for (let i = 1; i < coords.length; i++) {
+    walked += haversineMeters(coords[i - 1]!, coords[i]!);
+    current.push(coords[i]!);
+    if (walked >= maxMeters && i < coords.length - 1) {
+      slices.push(current);
+      current = [coords[i]!];
+      walked = 0;
     }
-    chain.push(to);
   }
-  return chain;
+  // Fold a short tail into the previous slice instead of a tiny last leg.
+  const last = slices[slices.length - 1];
+  if (last && walked < maxMeters * 0.25) {
+    last.push(...current.slice(1));
+  } else {
+    slices.push(current);
+  }
+  return slices;
 }
 
 /** True when the direct trip needs more than one download/routing leg. */
@@ -52,21 +49,6 @@ export function needsRouteChunking(
     }
   }
   return waypoints.length > 0;
-}
-
-function splitSegment(
-  a: Coordinate,
-  b: Coordinate,
-  maxChunkMeters: number,
-): Coordinate[] {
-  const dist = haversineMeters(a, b);
-  if (dist <= maxChunkMeters) return [];
-  const parts = Math.ceil(dist / maxChunkMeters);
-  const vias: Coordinate[] = [];
-  for (let i = 1; i < parts; i++) {
-    vias.push(interpolateGeodesic(a, b, i / parts));
-  }
-  return vias;
 }
 
 /** Spherical interpolation along the great-circle from a → b (f in 0..1). */

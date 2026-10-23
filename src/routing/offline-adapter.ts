@@ -5,18 +5,32 @@ import type {
   RoutingAdapter,
 } from './routing-adapter';
 import {
+  NoRoadPathError,
   offlineGraphEngine,
   type NetworkFeatureCollection,
+  type RouteOptions,
   type RoutingNetworkMeta,
 } from './graph-engine';
 import { valhallaOfflineAdapter } from './valhalla-adapter';
-import { loadOsmNetworkForRoute } from './osm-network-loader';
+import {
+  clipNetwork,
+  loadLocalArea,
+  loadOsmNetworkForRoute,
+  mergeNetworks,
+  paddedBbox,
+} from './osm-network-loader';
+import {
+  backboneRadiusMeters,
+  loadBackboneNetwork,
+} from './backbone-loader';
 import { mergeRoutes } from './route-merge';
 import {
-  expandRouteChain,
+  ROUTE_CHUNK_MAX_M,
   needsRouteChunking,
-  type RouteChainPoint,
+  splitPolyline,
 } from './route-chunking';
+import { haversineMeters, polylineLengthMeters } from './geo';
+import { buildManeuversFromPath } from './maneuver-builder';
 import {
   idleProgress,
   type RoutingProgress,
@@ -28,7 +42,23 @@ import { isAbortError, throwIfAborted } from './abort';
 export const DEMO_NETWORK_URL = '/assets/routing/demo-network.geojson';
 export const VALHALLA_TILES_URL = '/assets/routing/valhalla-tiles.tar';
 
+/** Detail refinement leg along the backbone path. */
+const REFINE_LEG_M = 50_000;
+/** Full-detail streets around each trip endpoint for the backbone pass. */
+const LOCAL_AREA_M = 6_000;
+/** Secondary / tertiary roads around each endpoint, out to the highways. */
+const CONNECTOR_AREA_M = 20_000;
+/** Major roads around the refined leg, merged in so gaps still connect. */
+const REFINE_BACKBONE_PAD_M = 5_000;
+
 export type OfflineEngineKind = 'valhalla' | 'graph' | 'none';
+
+interface BackbonePass {
+  /** Major roads + local streets the backbone legs were routed on. */
+  network: NetworkFeatureCollection;
+  /** One route per user leg (start → stop → … → end). */
+  legs: CalculatedRoute[];
+}
 
 export interface OfflineEngineStatus {
   kind: OfflineEngineKind;
@@ -173,50 +203,69 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
         return [route];
       }
 
-      // Long trips + user waypoints: chain short legs (download + A* per hop).
-      if (needsRouteChunking(start, end, waypoints)) {
-        const chain = expandRouteChain(start, end, waypoints);
-        const merged = await this.calculateChainedRoute(chain, profile, signal);
-        this.emitProgress({
-          phase: 'done',
-          label:
-            chain.length > 2
-              ? `Route ready · ${chain.length - 1} legs`
-              : 'Route ready',
-          percent: 100,
-        });
-        return [merged];
+      const routeOptions: RouteOptions = {
+        profile,
+        allowExpressways: options.allowExpressways ?? false,
+      };
+      const anchors = [start, ...waypoints, end];
+
+      // Short trip: one download, a few alternatives.
+      if (!needsRouteChunking(start, end, waypoints)) {
+        try {
+          const routes = await this.calculateDirectRoutes(
+            start,
+            end,
+            { ...routeOptions, alternatives },
+            signal,
+          );
+          this.emitProgress({
+            phase: 'done',
+            label:
+              routes.length > 1
+                ? `${routes.length} road options ready`
+                : 'Route ready',
+            percent: 100,
+          });
+          return routes;
+        } catch (e) {
+          // The connecting road may leave the small download box.
+          if (!(e instanceof NoRoadPathError)) throw e;
+        }
+      } else if (everyHopWithin(anchors, ROUTE_CHUNK_MAX_M)) {
+        // Stops close together: route stop to stop.
+        try {
+          const merged = await this.calculateChainedRoute(
+            anchors,
+            routeOptions,
+            signal,
+          );
+          this.emitProgress({
+            phase: 'done',
+            label:
+              anchors.length > 2
+                ? `Route ready · ${anchors.length - 1} legs`
+                : 'Route ready',
+            percent: 100,
+          });
+          return [merged];
+        } catch (e) {
+          if (!(e instanceof NoRoadPathError)) throw e;
+        }
       }
 
-      await this.ensureRoadGraph(start, end, {
-        requireCoverage: false,
+      // Long trip, or the corridor didn't connect: find the real road
+      // corridor on major roads first, then refine along it.
+      const merged = await this.calculateTwoPassRoute(
+        anchors,
+        routeOptions,
         signal,
-      });
-
-      this.emitProgress({
-        phase: 'calculating',
-        label: 'Finding best & alternative roads…',
-        percent: null,
-      });
-
-      const snapped = this.snapRoutingEndpoints(start, end);
-      const routes = offlineGraphEngine.calculateRoutes(
-        snapped.start,
-        snapped.end,
-        {
-          profile,
-          alternatives,
-        },
       );
       this.emitProgress({
         phase: 'done',
-        label:
-          routes.length > 1
-            ? `${routes.length} road options ready`
-            : 'Route ready',
+        label: 'Route ready',
         percent: 100,
       });
-      return routes;
+      return [merged];
     } catch (e) {
       if (isAbortError(e)) throw e;
       this.emitProgress({
@@ -233,15 +282,40 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
     }
   }
 
+  private async calculateDirectRoutes(
+    start: Coordinate,
+    end: Coordinate,
+    routeOptions: RouteOptions,
+    signal?: AbortSignal,
+  ): Promise<CalculatedRoute[]> {
+    await this.ensureRoadGraph(start, end, {
+      requireCoverage: false,
+      signal,
+    });
+
+    this.emitProgress({
+      phase: 'calculating',
+      label: 'Finding best & alternative roads…',
+      percent: null,
+    });
+
+    const snapped = this.snapRoutingEndpoints(start, end, routeOptions);
+    return offlineGraphEngine.calculateRoutes(
+      snapped.start,
+      snapped.end,
+      routeOptions,
+    );
+  }
+
   /**
-   * Route a chain of points leg-by-leg. Each hop downloads only its corridor.
-   * The next hop's Overpass request is started before A* on the current hop,
-   * so the mirror can work while the search runs. Routing stays in order:
-   * hop N+1 begins at the snapped end of hop N.
+   * Route stop to stop when every hop is short. Each hop downloads only its
+   * corridor. The next hop's Overpass request is started before A* on the
+   * current hop, so the mirror can work while the search runs. Routing stays
+   * in order: hop N+1 begins at the snapped end of hop N.
    */
   private async calculateChainedRoute(
-    chain: RouteChainPoint[],
-    profile: RoutingProfileId,
+    chain: Coordinate[],
+    routeOptions: RouteOptions,
     signal?: AbortSignal,
   ): Promise<CalculatedRoute> {
     throwIfAborted(signal);
@@ -250,7 +324,7 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
     }
 
     const legs: CalculatedRoute[] = [];
-    let cursor = chain[0]!.coordinate;
+    let cursor = chain[0]!;
     const legCount = chain.length - 1;
     const downloads = new Map<number, Promise<NetworkFeatureCollection>>();
 
@@ -283,20 +357,19 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
       downloads.set(legNumber, task);
     };
 
-    preload(1, chain[0]!.coordinate, chain[1]!.coordinate, true);
+    preload(1, chain[0]!, chain[1]!, true);
     if (legCount > 1) {
-      preload(2, chain[1]!.coordinate, chain[2]!.coordinate, false);
+      preload(2, chain[1]!, chain[2]!, false);
     }
 
     for (let i = 1; i < chain.length; i++) {
       throwIfAborted(signal);
       const stop = chain[i]!;
       const legIndex = i;
-      const maxSnap = stop.synthetic ? 12_000 : 2_500;
       const label = `Leg ${legIndex} of ${legCount} — loading roads…`;
 
       if (i + 1 <= legCount) {
-        preload(i + 1, chain[i]!.coordinate, chain[i + 1]!.coordinate, false);
+        preload(i + 1, chain[i]!, chain[i + 1]!, false);
       }
 
       this.emitProgress({
@@ -308,23 +381,19 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
             : null,
       });
 
-      const prefetchFrom = chain[i - 1]!.coordinate;
+      const prefetchFrom = chain[i - 1]!;
       const prefetchMatchesCursor =
         prefetchFrom[0] === cursor[0] && prefetchFrom[1] === cursor[1];
 
-      await this.loadPrefetchedCorridor(cursor, stop.coordinate, {
+      await this.loadPrefetchedCorridor(cursor, stop, {
         signal,
         progressLabel: label,
         prefetched: downloads.get(legIndex),
         refetchOnMiss: !prefetchMatchesCursor,
-        maxSnapMeters: maxSnap,
+        maxSnapMeters: 2_500,
       });
 
-      const snapped = this.snapRoutingEndpoints(
-        cursor,
-        stop.coordinate,
-        maxSnap,
-      );
+      const snapped = this.snapRoutingEndpoints(cursor, stop, routeOptions);
 
       this.emitProgress({
         phase: 'calculating',
@@ -336,19 +405,184 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
       });
 
       legs.push(
-        offlineGraphEngine.calculateRoute(snapped.start, snapped.end, {
-          profile,
-        }),
+        offlineGraphEngine.calculateRoute(
+          snapped.start,
+          snapped.end,
+          routeOptions,
+        ),
       );
       cursor = snapped.end;
     }
 
     const merged = mergeRoutes(legs);
-    merged.profile = profile;
+    merged.profile = routeOptions.profile;
     merged.label =
       legs.length > 1 ? `Best match · ${legs.length} legs` : 'Best match';
     merged.id = `graph-chunked-${legs.length}`;
     return merged;
+  }
+
+  /**
+   * Long trips. Pass 1 routes on major roads (cached tiles around the trip)
+   * plus local streets at each stop, which finds where the road really goes
+   * — inland highways, bridges, ghats — instead of the straight line.
+   * Pass 2 downloads full detail along that path, leg by leg, and re-routes
+   * each leg with the backbone merged in. A leg that still fails keeps its
+   * backbone path, so once pass 1 succeeds the trip always gets a route.
+   */
+  private async calculateTwoPassRoute(
+    anchors: Coordinate[],
+    routeOptions: RouteOptions,
+    signal?: AbortSignal,
+  ): Promise<CalculatedRoute> {
+    let radius = backboneRadiusMeters(polylineLengthMeters(anchors));
+    let backbone: BackbonePass | null = null;
+    for (let attempt = 0; attempt < 2 && !backbone; attempt++) {
+      try {
+        backbone = await this.routeOnBackbone(
+          anchors,
+          radius,
+          routeOptions,
+          signal,
+        );
+      } catch (e) {
+        if (!(e instanceof NoRoadPathError)) throw e;
+        // The road may detour further than expected: widen once.
+        radius *= 2;
+      }
+    }
+    if (!backbone) {
+      throw new NoRoadPathError(
+        routeOptions.allowExpressways
+          ? 'No road connection found between these places'
+          : 'No road connection found without expressways — try allowing them',
+      );
+    }
+
+    const slices = backbone.legs.flatMap((leg) => {
+      const legMeters = Math.max(1, polylineLengthMeters(leg.coordinates));
+      return splitPolyline(leg.coordinates, REFINE_LEG_M).map((guide) => ({
+        guide,
+        seconds:
+          (polylineLengthMeters(guide) / legMeters) * leg.durationSeconds,
+      }));
+    });
+
+    const downloads = new Map<number, Promise<NetworkFeatureCollection>>();
+    const preload = (index: number) => {
+      const slice = slices[index];
+      if (!slice || downloads.has(index)) return;
+      const guide = slice.guide;
+      const task = loadOsmNetworkForRoute(
+        guide[0]!,
+        guide[guide.length - 1]!,
+        [],
+        undefined,
+        signal,
+        { guide },
+      );
+      void task.catch(() => {});
+      downloads.set(index, task);
+    };
+    preload(0);
+    preload(1);
+
+    const legs: CalculatedRoute[] = [];
+    for (let k = 0; k < slices.length; k++) {
+      throwIfAborted(signal);
+      preload(k + 1);
+      const { guide, seconds } = slices[k]!;
+      this.emitProgress({
+        phase: 'downloading-roads',
+        label: `Refining leg ${k + 1} of ${slices.length}…`,
+        percent: Math.round((k / slices.length) * 100),
+      });
+      try {
+        const detail = await downloads.get(k)!;
+        throwIfAborted(signal);
+        this.applyRoadCollection(
+          mergeNetworks([
+            clipNetwork(
+              backbone.network,
+              paddedBbox(guide, REFINE_BACKBONE_PAD_M),
+            ),
+            detail,
+          ]),
+        );
+        const snapped = this.snapRoutingEndpoints(
+          guide[0]!,
+          guide[guide.length - 1]!,
+          routeOptions,
+        );
+        legs.push(
+          offlineGraphEngine.calculateRoute(
+            snapped.start,
+            snapped.end,
+            routeOptions,
+          ),
+        );
+      } catch (e) {
+        if (isAbortError(e)) throw e;
+        legs.push(pathAsRoute(guide, seconds));
+      }
+    }
+
+    const merged = mergeRoutes(legs);
+    merged.profile = routeOptions.profile;
+    merged.label = 'Best match';
+    merged.id = `graph-two-pass-${legs.length}`;
+    return merged;
+  }
+
+  /** Pass 1: one A* per user leg on major roads + local streets. */
+  private async routeOnBackbone(
+    anchors: Coordinate[],
+    radiusMeters: number,
+    routeOptions: RouteOptions,
+    signal?: AbortSignal,
+  ): Promise<BackbonePass> {
+    const [backbone, ...locals] = await Promise.all([
+      loadBackboneNetwork(
+        anchors,
+        radiusMeters,
+        (progress) => this.emitProgress(progress),
+        signal,
+      ),
+      ...anchors.map((point) =>
+        loadLocalArea(point, LOCAL_AREA_M, CONNECTOR_AREA_M, undefined, signal),
+      ),
+    ]);
+    throwIfAborted(signal);
+
+    this.emitProgress({
+      phase: 'building-graph',
+      label: 'Building major-road graph…',
+      percent: null,
+    });
+    const network = mergeNetworks([backbone!, ...locals]);
+    this.applyRoadCollection(network);
+
+    this.emitProgress({
+      phase: 'calculating',
+      label: 'Finding the main route…',
+      percent: null,
+    });
+    const legs: CalculatedRoute[] = [];
+    for (let i = 1; i < anchors.length; i++) {
+      const snapped = this.snapRoutingEndpoints(
+        anchors[i - 1]!,
+        anchors[i]!,
+        routeOptions,
+      );
+      legs.push(
+        offlineGraphEngine.calculateRoute(
+          snapped.start,
+          snapped.end,
+          routeOptions,
+        ),
+      );
+    }
+    return { network, legs };
   }
 
   /**
@@ -358,14 +592,22 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
   private snapRoutingEndpoints(
     start: Coordinate,
     end: Coordinate,
+    routeOptions: RouteOptions,
     maxMeters = 2_500,
   ): { start: Coordinate; end: Coordinate } {
-    const snappedStart =
-      offlineGraphEngine.nearestRoadCoordinate(start, maxMeters) ?? null;
-    const snappedEnd =
-      offlineGraphEngine.nearestRoadCoordinate(end, maxMeters) ?? null;
+    const snapOptions = { allowExpressways: routeOptions.allowExpressways };
+    const snappedStart = offlineGraphEngine.nearestRoadCoordinate(
+      start,
+      maxMeters,
+      snapOptions,
+    );
+    const snappedEnd = offlineGraphEngine.nearestRoadCoordinate(
+      end,
+      maxMeters,
+      snapOptions,
+    );
     if (!snappedStart || !snappedEnd) {
-      throw new Error(
+      throw new NoRoadPathError(
         'Could not snap onto downloaded roads — try a pin closer to a street, or pick the place on the map',
       );
     }
@@ -498,7 +740,7 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
         offlineGraphEngine.nearestRoadCoordinate(start, 2_500) &&
         offlineGraphEngine.nearestRoadCoordinate(end, 2_500);
       if (!soft) {
-        throw new Error(
+        throw new NoRoadPathError(
           'Could not snap onto downloaded roads — try a pin closer to a street, or pick the place on the map',
         );
       }
@@ -513,6 +755,23 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
   private emitProgress(progress: RoutingProgress): void {
     for (const listener of this.progressListeners) listener(progress);
   }
+}
+
+/** A known road path as a route (fallback when detail routing fails). */
+function pathAsRoute(path: Coordinate[], seconds: number): CalculatedRoute {
+  return {
+    coordinates: path,
+    distanceMeters: polylineLengthMeters(path),
+    durationSeconds: Math.max(1, Math.round(seconds)),
+    instructions: buildManeuversFromPath(path),
+  };
+}
+
+function everyHopWithin(points: Coordinate[], maxMeters: number): boolean {
+  for (let i = 1; i < points.length; i++) {
+    if (haversineMeters(points[i - 1]!, points[i]!) > maxMeters) return false;
+  }
+  return true;
 }
 
 function normalizeOptions(

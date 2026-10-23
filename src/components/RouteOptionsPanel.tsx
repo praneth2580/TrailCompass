@@ -15,6 +15,8 @@ interface RouteOptionsPanelProps {
   showAllRoutes: boolean;
   visible: boolean;
   onProfileChange: (profile: RoutingProfileId) => void;
+  allowExpressways: boolean;
+  onAllowExpresswaysChange: (allow: boolean) => void;
   onSelectAlternative: (index: number) => void;
   onStartNavigation: (index: number) => void;
   onToggleShowAll: (showAll: boolean) => void;
@@ -27,6 +29,8 @@ export function RouteOptionsPanel({
   showAllRoutes,
   visible,
   onProfileChange,
+  allowExpressways,
+  onAllowExpresswaysChange,
   onSelectAlternative,
   onStartNavigation,
   onToggleShowAll,
@@ -128,6 +132,23 @@ export function RouteOptionsPanel({
               </span>
               {activeProfile.description}
             </p>
+            <div className="tc-route-section-row">
+              <p className="tc-route-section-label">
+                Expressways · most in India ban two-wheelers
+              </p>
+              <button
+                type="button"
+                className={
+                  allowExpressways
+                    ? 'tc-route-toggle tc-route-toggle-on'
+                    : 'tc-route-toggle'
+                }
+                aria-pressed={allowExpressways}
+                onClick={() => onAllowExpresswaysChange(!allowExpressways)}
+              >
+                {allowExpressways ? 'Allowed' : 'Avoided'}
+              </button>
+            </div>
           </div>
 
           {hasRoutes ? (

@@ -24,6 +24,8 @@ export interface RouteRequestOptions {
   profile?: RoutingProfileId;
   /** How many distinct corridor alternatives to return (including best). */
   alternatives?: number;
+  /** Ride motorways / expressways not tagged for motorcycles. Default false. */
+  allowExpressways?: boolean;
   /** Cancels an in-flight road download when the rider changes the trip. */
   signal?: AbortSignal;
 }

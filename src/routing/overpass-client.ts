@@ -5,12 +5,17 @@ import { overpassScheduler } from './overpass-scheduler';
 const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
 ];
+/** Give up on a mirror this long after the query's own server timeout. */
+const CLIENT_TIMEOUT_GRACE_MS = 15_000;
+const DEFAULT_CLIENT_TIMEOUT_MS = 120_000;
 
 /**
  * Run an Overpass QL query. One mirror at a time for a single query; the
  * scheduler may overlap a different request. On 429 / 5xx / network
- * failure, back off and try the other mirror — never both at once.
+ * failure or a mirror that stops answering, back off and try the next
+ * mirror — never several at once.
  */
 export async function fetchOverpass<T>(
   query: string,
@@ -20,13 +25,23 @@ export async function fetchOverpass<T>(
   let lastError: Error | undefined;
   let mirror = 0;
   const maxAttempts = OVERPASS_ENDPOINTS.length * 2;
+  const timeoutMs = clientTimeoutMs(query);
 
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+  for (let attemptIndex = 0; attemptIndex < maxAttempts; attemptIndex++) {
     throwIfAborted(signal);
     const endpoint = OVERPASS_ENDPOINTS[mirror % OVERPASS_ENDPOINTS.length]!;
     const release = await overpassScheduler.acquire(signal);
     const started = performance.now();
     let backoffMs = 0;
+    // Per-attempt signal: the caller's abort, or this mirror going silent.
+    const attempt = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      attempt.abort();
+    }, timeoutMs);
+    const forwardAbort = () => attempt.abort();
+    signal?.addEventListener('abort', forwardAbort, { once: true });
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -35,18 +50,18 @@ export async function fetchOverpass<T>(
           Accept: 'application/json',
         },
         body: `data=${encodeURIComponent(query)}`,
-        signal,
+        signal: attempt.signal,
       });
 
       if (isSaturatedStatus(response.status)) {
         overpassScheduler.noteSaturated();
         lastError = new Error(`Overpass HTTP ${response.status}`);
         mirror += 1;
-        backoffMs = retryAfterMs(response) ?? backoffDelayMs(attempt);
+        backoffMs = retryAfterMs(response) ?? backoffDelayMs(attemptIndex);
       } else if (!response.ok) {
         lastError = new Error(`Overpass HTTP ${response.status}`);
         mirror += 1;
-        backoffMs = backoffDelayMs(attempt);
+        backoffMs = backoffDelayMs(attemptIndex);
       } else {
         const text = await readResponseText(response, onProgress);
         try {
@@ -56,16 +71,23 @@ export async function fetchOverpass<T>(
         } catch {
           lastError = new Error('Overpass returned invalid JSON');
           mirror += 1;
-          backoffMs = backoffDelayMs(attempt);
+          backoffMs = backoffDelayMs(attemptIndex);
         }
       }
     } catch (e) {
-      if (isAbortError(e)) throw e;
+      if (signal?.aborted) throw abortError();
+      if (isAbortError(e) && !timedOut) throw e;
       overpassScheduler.noteSaturated();
-      lastError = e instanceof Error ? e : new Error('Overpass request failed');
+      lastError = timedOut
+        ? new Error('Overpass mirror timed out')
+        : e instanceof Error
+          ? e
+          : new Error('Overpass request failed');
       mirror += 1;
-      backoffMs = backoffDelayMs(attempt);
+      backoffMs = backoffDelayMs(attemptIndex);
     } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', forwardAbort);
       release();
     }
 
@@ -73,6 +95,14 @@ export async function fetchOverpass<T>(
   }
 
   throw lastError ?? new Error('Overpass request failed');
+}
+
+/** The query's `[timeout:N]` plus a grace period, or a default. */
+function clientTimeoutMs(query: string): number {
+  const match = query.match(/\[timeout:(\d+)\]/);
+  return match
+    ? Number(match[1]) * 1_000 + CLIENT_TIMEOUT_GRACE_MS
+    : DEFAULT_CLIENT_TIMEOUT_MS;
 }
 
 function isSaturatedStatus(status: number): boolean {

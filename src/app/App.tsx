@@ -65,6 +65,9 @@ export default function App() {
     tripPlanner.getState(),
   );
   const [planBusy, setPlanBusy] = useState(false);
+  const [allowExpressways, setAllowExpressways] = useState(() =>
+    navigationService.getAllowExpressways(),
+  );
   const previewToken = useRef(0);
   const planTripKey = useRef<string | null>(null);
   const screenRef = useRef<AppScreen>(screen);
@@ -382,8 +385,7 @@ export default function App() {
     );
   };
 
-  const handleProfileChange = (profile: RoutingProfileId) => {
-    navigationService.setProfile(profile);
+  const replanAfterOptionChange = () => {
     const end =
       tripPlanner.getDestinationCoordinate() ?? nav.destination ?? null;
     if (
@@ -406,6 +408,17 @@ export default function App() {
         });
       }
     }
+  };
+
+  const handleProfileChange = (profile: RoutingProfileId) => {
+    navigationService.setProfile(profile);
+    replanAfterOptionChange();
+  };
+
+  const handleAllowExpresswaysChange = (allow: boolean) => {
+    navigationService.setAllowExpressways(allow);
+    setAllowExpressways(allow);
+    replanAfterOptionChange();
   };
 
   const handleGoToMyLocation = () => {
@@ -618,6 +631,8 @@ export default function App() {
                 selectedIndex={nav.selectedAlternativeIndex ?? 0}
                 showAllRoutes={nav.showAllRoutes === true}
                 onProfileChange={handleProfileChange}
+                allowExpressways={allowExpressways}
+                onAllowExpresswaysChange={handleAllowExpresswaysChange}
                 onSelectAlternative={(index) =>
                   navigationService.selectAlternative(index)
                 }
