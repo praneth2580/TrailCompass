@@ -32,7 +32,7 @@ import {
   offlineRoutingAdapter,
   type OfflineEngineStatus,
 } from '../routing/offline-adapter';
-import type { Coordinate } from '../routing/routing-adapter';
+import type { CalculatedRoute, Coordinate } from '../routing/routing-adapter';
 import type { CompassReading, GpsFix, NavigationState } from '../types/navigation';
 import type { SavedRoute } from '../types/route';
 import type { StopKind } from '../types/trip-stop';
@@ -266,14 +266,23 @@ export default function App() {
     }
   };
 
-  const handlePreviewFromPlan = () => {
+  /**
+   * Plan the Plan-tab itinerary from GPS. With `showMap` the rider is taken
+   * to the map and errors are toasted; without it, the Plan tab stays put and
+   * errors are thrown so the caller (e.g. stop suggestions) can show them.
+   * Resolves to null when superseded or cancelled.
+   */
+  const planTripFromItinerary = async ({
+    showMap,
+  }: {
+    showMap: boolean;
+  }): Promise<CalculatedRoute | null> => {
     const end = tripPlanner.getDestinationCoordinate();
     if (!end) {
-      setToast({
-        message: 'Set a destination on Plan first',
-        tone: 'error',
-      });
-      return;
+      const message = 'Set a destination on Plan first';
+      if (!showMap) throw new Error(message);
+      setToast({ message, tone: 'error' });
+      return null;
     }
     const waypoints = tripPlanner.getWaypoints();
     const token = ++previewToken.current;
@@ -284,44 +293,49 @@ export default function App() {
     navigationService.setWaypoints(waypoints);
     navigationService.cancelPlanning();
     navigationService.showPlanning('Getting GPS…');
-    setScreen('map');
-    setFollowGps(true);
+    if (showMap) {
+      setScreen('map');
+      setFollowGps(true);
+    }
 
-    void (async () => {
-      try {
-        const start = await resolveStartForPreview();
-        if (token !== previewToken.current) return;
-        mapService.centerOn(start);
-        const result = await navigationService.planRoute(start, end, waypoints);
-        if (token !== previewToken.current || result === 'cancelled') return;
-        if (result === 'error') {
-          const state = navigationService.getState();
+    let failure: string | null = null;
+    try {
+      const start = await resolveStartForPreview();
+      if (token !== previewToken.current) return null;
+      mapService.centerOn(start);
+      const result = await navigationService.planRoute(start, end, waypoints);
+      if (token !== previewToken.current || result === 'cancelled') return null;
+      if (result === 'error') {
+        failure = navigationService.getState().message ?? 'Could not plan trip';
+      } else {
+        if (showMap) {
           setToast({
-            message: state.message ?? 'Could not plan trip',
-            tone: 'error',
+            message:
+              waypoints.length > 0
+                ? `Route ready · ${waypoints.length} stop${waypoints.length === 1 ? '' : 's'}`
+                : 'Route ready — tap Start',
+            tone: 'success',
           });
-          if (screenRef.current === 'map') setScreen('plan');
-          return;
         }
-        setToast({
-          message:
-            waypoints.length > 0
-              ? `Route ready · ${waypoints.length} stop${waypoints.length === 1 ? '' : 's'}`
-              : 'Route ready — tap Start',
-          tone: 'success',
-        });
-      } catch (e) {
-        if (token !== previewToken.current) return;
-        navigationService.cancelPlanning();
-        setToast({
-          message: e instanceof Error ? e.message : 'Could not plan trip',
-          tone: 'error',
-        });
-        if (screenRef.current === 'map') setScreen('plan');
-      } finally {
-        if (token === previewToken.current) setPlanBusy(false);
+        return navigationService.getActiveCalculatedRoute();
       }
-    })();
+    } catch (e) {
+      if (token !== previewToken.current) return null;
+      navigationService.cancelPlanning();
+      failure = e instanceof Error ? e.message : 'Could not plan trip';
+    } finally {
+      if (token === previewToken.current) setPlanBusy(false);
+    }
+
+    const message = failure ?? 'Could not plan trip';
+    if (!showMap) throw new Error(message);
+    setToast({ message, tone: 'error' });
+    if (screenRef.current === 'map') setScreen('plan');
+    return null;
+  };
+
+  const handlePreviewFromPlan = () => {
+    void planTripFromItinerary({ showMap: true });
   };
 
   const handleClearTrip = () => {
@@ -658,6 +672,7 @@ export default function App() {
             engineReady={engine.ready}
             planning={planBusy || nav.status === 'planning'}
             onPreview={handlePreviewFromPlan}
+            onPlanInPlace={() => planTripFromItinerary({ showMap: false })}
             onStart={() => {
               handleStartNavigation();
               setScreen('map');

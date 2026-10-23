@@ -25,6 +25,8 @@ interface PlanScreenProps {
   engineReady: boolean;
   planning: boolean;
   onPreview: () => void;
+  /** Plan the itinerary without leaving Plan; throws on routing errors. */
+  onPlanInPlace: () => Promise<CalculatedRoute | null>;
   onStart: () => void;
   onClear: () => void;
   onRequestMapPick: (kind: StopKind, mode: 'destination' | 'stop') => void;
@@ -37,6 +39,7 @@ export function PlanScreen({
   engineReady,
   planning,
   onPreview,
+  onPlanInPlace,
   onStart,
   onClear,
   onRequestMapPick,
@@ -264,7 +267,14 @@ export function PlanScreen({
         open={suggestKind != null}
         kind={suggestKind ?? 'fuel'}
         route={activeRoute}
+        canPlanRoute={canPreview}
+        planningLabel={
+          nav.status === 'planning'
+            ? (nav.progress?.label ?? nav.message)
+            : undefined
+        }
         existingCoordinates={existingStopCoords}
+        onEnsureRoute={onPlanInPlace}
         onClose={() => setSuggestKind(null)}
         onPick={handleStopPick}
         onBrowse={() => {

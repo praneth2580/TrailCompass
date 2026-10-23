@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { CalculatedRoute, Coordinate } from '../routing/routing-adapter';
 import { formatDistanceShort } from '../routing/route-naming';
 import {
@@ -21,11 +21,19 @@ import {
   type StopSuggestion,
 } from '../services/stop-suggest.service';
 
+type SuggestPhase = 'idle' | 'routing' | 'searching';
+
 interface StopSuggestSheetProps {
   open: boolean;
   kind: PoiKind;
   route: CalculatedRoute | null;
+  /** True when a route can be planned on demand (destination set, engine ready). */
+  canPlanRoute: boolean;
+  /** Road-download / routing progress while planning on demand. */
+  planningLabel?: string;
   existingCoordinates?: Coordinate[];
+  /** Plan the trip in place; resolves null if superseded, throws on error. */
+  onEnsureRoute: () => Promise<CalculatedRoute | null>;
   onClose: () => void;
   onPick: (stop: TripStop) => void;
   onBrowse: () => void;
@@ -35,7 +43,10 @@ export function StopSuggestSheet({
   open,
   kind,
   route,
+  canPlanRoute,
+  planningLabel,
   existingCoordinates,
+  onEnsureRoute,
   onClose,
   onPick,
   onBrowse,
@@ -47,43 +58,57 @@ export function StopSuggestSheet({
   const [departTime, setDepartTime] = useState(() => loadDepartTime());
   const [meals, setMeals] = useState<MealKind[]>(() => loadMealKinds());
   const [suggestions, setSuggestions] = useState<StopSuggestion[]>([]);
-  const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState<SuggestPhase>('idle');
   const [error, setError] = useState<string | null>(null);
   const [addedIds, setAddedIds] = useState<Set<string>>(() => new Set());
+  // Bumped whenever the sheet closes or switches kind so late results drop.
+  const runToken = useRef(0);
+
+  const busy = phase !== 'idle';
+  const hasRoute = route != null && route.coordinates.length >= 2;
 
   if (sessionKey !== session) {
     setSession(sessionKey);
     setSuggestions([]);
-    setBusy(false);
-    setError(
-      route && route.coordinates.length >= 2
-        ? null
-        : 'Preview the trip on the map first, then suggest stops',
-    );
+    setPhase('idle');
+    setError(null);
     setAddedIds(new Set());
     setTankKm(loadTankRangeKm());
     setDepartTime(loadDepartTime());
     setMeals(loadMealKinds());
   }
 
-  async function runSuggest() {
-    if (!route || route.coordinates.length < 2) {
-      setError('Preview the trip on the map first, then suggest stops');
-      setSuggestions([]);
-      return;
-    }
+  useEffect(() => {
+    runToken.current += 1;
+  }, [sessionKey]);
 
-    setBusy(true);
+  async function runSuggest() {
+    const token = runToken.current;
+    const stale = () => token !== runToken.current;
+
     setError(null);
     setSuggestions([]);
     try {
+      let target: CalculatedRoute | null = hasRoute ? route : null;
+      if (!target) {
+        setPhase('routing');
+        target = await onEnsureRoute();
+        if (stale()) return;
+        if (!target) {
+          setError('Trip changed while planning — tap Suggest stops again');
+          return;
+        }
+      }
+
+      setPhase('searching');
       if (kind === 'fuel') {
         saveTankRangeKm(tankKm);
         const next = await suggestFuelStops({
-          route,
+          route: target,
           tankRangeKm: tankKm,
           existingCoordinates,
         });
+        if (stale()) return;
         setSuggestions(next);
         if (next.length === 0) {
           setError(
@@ -94,11 +119,12 @@ export function StopSuggestSheet({
         saveDepartTime(departTime);
         saveMealKinds(meals);
         const next = await suggestFoodStops({
-          route,
+          route: target,
           departTime,
           meals,
           existingCoordinates,
         });
+        if (stale()) return;
         setSuggestions(next);
         if (next.length === 0) {
           setError(
@@ -107,9 +133,10 @@ export function StopSuggestSheet({
         }
       }
     } catch (e) {
+      if (stale()) return;
       setError(e instanceof Error ? e.message : 'Suggestion failed');
     } finally {
-      setBusy(false);
+      if (!stale()) setPhase('idle');
     }
   }
 
@@ -213,10 +240,14 @@ export function StopSuggestSheet({
           <button
             type="button"
             className="tc-btn"
-            disabled={busy || !route}
+            disabled={busy || (!hasRoute && !canPlanRoute)}
             onClick={() => void runSuggest()}
           >
-            {busy ? 'Finding…' : 'Suggest stops'}
+            {phase === 'routing'
+              ? 'Planning route…'
+              : phase === 'searching'
+                ? 'Finding…'
+                : 'Suggest stops'}
           </button>
           <button
             type="button"
@@ -228,15 +259,21 @@ export function StopSuggestSheet({
         </div>
 
         <div className="tc-plan-hit-list" role="listbox" aria-label="Suggestions">
-          {busy ? (
+          {phase === 'routing' ? (
+            <p className="tc-plan-hit-empty">
+              {planningLabel ?? 'Planning route…'}
+            </p>
+          ) : phase === 'searching' ? (
             <p className="tc-plan-hit-empty">Searching OpenStreetMap…</p>
           ) : error && suggestions.length === 0 ? (
             <p className="tc-plan-hit-empty">{error}</p>
           ) : suggestions.length === 0 ? (
             <p className="tc-plan-hit-empty">
-              {route
+              {hasRoute
                 ? 'Tap Suggest stops'
-                : 'Preview on map first, then suggest'}
+                : canPlanRoute
+                  ? "Tap Suggest stops — we'll plan the route first"
+                  : 'Set a destination first'}
             </p>
           ) : (
             suggestions.map((item) => {
