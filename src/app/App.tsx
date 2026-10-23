@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { MapView } from '../components/MapView';
 import { CompassWidget } from '../components/CompassWidget';
 import { NavigationBanner } from '../components/NavigationBanner';
@@ -65,6 +65,9 @@ export default function App() {
     tripPlanner.getState(),
   );
   const [planBusy, setPlanBusy] = useState(false);
+  const previewToken = useRef(0);
+  const planTripKey = useRef<string | null>(null);
+  const screenRef = useRef<AppScreen>(screen);
 
   const { rideMode, dismissRideMode } = useRideFullscreen({
     status: nav.status,
@@ -90,6 +93,19 @@ export default function App() {
     const unsubNav = navigationService.subscribe(setNav);
     const unsubEngine = offlineRoutingAdapter.subscribe(setEngine);
     const unsubTrip = tripPlanner.subscribe(setItinerary);
+    const unsubMap = mapService.subscribeStatus((status) => {
+      if (!status.ok) return;
+      const { destination, stops } = tripPlanner.getState();
+      mapService.setDestination(destination?.coordinate ?? null);
+      mapService.setItineraryStops(
+        stops.map((stop) => ({
+          coordinate: stop.coordinate,
+          kind: stop.kind,
+          name: stop.name,
+        })),
+      );
+      navigationService.redrawMap();
+    });
 
     void locationService.startWatching();
     void compassService.start();
@@ -103,6 +119,7 @@ export default function App() {
       unsubNav();
       unsubEngine();
       unsubTrip();
+      unsubMap();
       window.clearInterval(tick);
       void locationService.stopWatching();
       compassService.stop();
@@ -121,6 +138,25 @@ export default function App() {
       void setBrowserFullscreen(false);
     };
   }, [rideMode, screen]);
+
+  useEffect(() => {
+    screenRef.current = screen;
+  }, [screen]);
+
+  useEffect(() => {
+    const planningNow = planBusy || nav.status === 'planning';
+    if (!planningNow || !planTripKey.current) return;
+    const key = JSON.stringify({
+      destination: itinerary.destination?.coordinate ?? null,
+      waypoints: itinerary.stops.map((stop) => stop.coordinate),
+      profile: nav.profile,
+    });
+    if (key === planTripKey.current) return;
+    planTripKey.current = null;
+    previewToken.current += 1;
+    setPlanBusy(false);
+    navigationService.cancelPlanning();
+  }, [itinerary, nav.profile, nav.status, planBusy]);
 
   useEffect(() => {
     if (!toast || toast.tone === 'loading') return;
@@ -166,6 +202,13 @@ export default function App() {
     }
   };
 
+  const readTripPlanKey = () =>
+    JSON.stringify({
+      destination: tripPlanner.getDestinationCoordinate(),
+      waypoints: tripPlanner.getWaypoints(),
+      profile: navigationService.getState().profile,
+    });
+
   const syncItineraryMarkers = () => {
     const { destination, stops } = tripPlanner.getState();
     mapService.setDestination(destination?.coordinate ?? null);
@@ -209,6 +252,7 @@ export default function App() {
     if (!end) return;
     const waypoints = tripPlanner.getWaypoints();
     syncItineraryMarkers();
+    planTripKey.current = readTripPlanKey();
     try {
       void navigationService.planRoute(resolveStart(), end, waypoints);
     } catch (e) {
@@ -229,26 +273,31 @@ export default function App() {
       return;
     }
     const waypoints = tripPlanner.getWaypoints();
+    const token = ++previewToken.current;
+    planTripKey.current = readTripPlanKey();
     setPlanBusy(true);
     syncItineraryMarkers();
     navigationService.setDestination(end);
     navigationService.setWaypoints(waypoints);
+    navigationService.cancelPlanning();
+    navigationService.showPlanning('Getting GPS…');
     setScreen('map');
     setFollowGps(true);
-    setToast({ message: 'Getting GPS & planning…', tone: 'loading' });
 
     void (async () => {
       try {
         const start = await resolveStartForPreview();
+        if (token !== previewToken.current) return;
         mapService.centerOn(start);
-        await navigationService.planRoute(start, end, waypoints);
-        const state = navigationService.getState();
-        if (state.status === 'error') {
+        const result = await navigationService.planRoute(start, end, waypoints);
+        if (token !== previewToken.current || result === 'cancelled') return;
+        if (result === 'error') {
+          const state = navigationService.getState();
           setToast({
             message: state.message ?? 'Could not plan trip',
             tone: 'error',
           });
-          setScreen('plan');
+          if (screenRef.current === 'map') setScreen('plan');
           return;
         }
         setToast({
@@ -259,15 +308,25 @@ export default function App() {
           tone: 'success',
         });
       } catch (e) {
+        if (token !== previewToken.current) return;
+        navigationService.cancelPlanning();
         setToast({
           message: e instanceof Error ? e.message : 'Could not plan trip',
           tone: 'error',
         });
-        setScreen('plan');
+        if (screenRef.current === 'map') setScreen('plan');
       } finally {
-        setPlanBusy(false);
+        if (token === previewToken.current) setPlanBusy(false);
       }
     })();
+  };
+
+  const handleClearTrip = () => {
+    previewToken.current += 1;
+    planTripKey.current = null;
+    setPlanBusy(false);
+    tripPlanner.clear();
+    navigationService.clearItinerary();
   };
 
   const handleRequestMapPick = (
@@ -316,6 +375,7 @@ export default function App() {
         nav.status === 'error' ||
         nav.status === 'idle')
     ) {
+      planTripKey.current = readTripPlanKey();
       try {
         void navigationService.planRoute(
           resolveStart(),
@@ -600,6 +660,7 @@ export default function App() {
               setScreen('map');
             }}
             onRequestMapPick={handleRequestMapPick}
+            onClear={handleClearTrip}
           />
           {toast ? (
             <StatusToast message={toast.message} tone={toast.tone} />

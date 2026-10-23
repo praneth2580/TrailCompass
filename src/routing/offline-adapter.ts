@@ -6,6 +6,7 @@ import type {
 } from './routing-adapter';
 import {
   offlineGraphEngine,
+  type NetworkFeatureCollection,
   type RoutingNetworkMeta,
 } from './graph-engine';
 import { valhallaOfflineAdapter } from './valhalla-adapter';
@@ -21,6 +22,7 @@ import {
   type RoutingProgressListener,
 } from './routing-progress';
 import type { RoutingProfileId } from './routing-profiles';
+import { isAbortError, throwIfAborted } from './abort';
 
 export const DEMO_NETWORK_URL = '/assets/routing/demo-network.geojson';
 export const VALHALLA_TILES_URL = '/assets/routing/valhalla-tiles.tar';
@@ -52,6 +54,8 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
   };
   private listeners = new Set<(status: OfflineEngineStatus) => void>();
   private progressListeners = new Set<RoutingProgressListener>();
+  /** Bumps on each calculateRoutes so a stale job cannot clear a newer one's progress. */
+  private jobEpoch = 0;
 
   subscribe(listener: (status: OfflineEngineStatus) => void): () => void {
     this.listeners.add(listener);
@@ -140,8 +144,11 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
     const waypoints = options.waypoints ?? [];
     const profile: RoutingProfileId = options.profile ?? 'fastest';
     const alternatives = options.alternatives ?? 3;
+    const signal = options.signal;
+    const epoch = ++this.jobEpoch;
 
     try {
+      throwIfAborted(signal);
       if (this.status.kind === 'valhalla') {
         this.emitProgress({
           phase: 'calculating',
@@ -153,6 +160,7 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
           end,
           waypoints,
         );
+        throwIfAborted(signal);
         route.profile = profile;
         route.label = 'Best match';
         route.id = `valhalla-${profile}`;
@@ -167,7 +175,7 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
       // Long trips + user waypoints: chain short legs (download + A* per hop).
       if (needsRouteChunking(start, end, waypoints)) {
         const chain = expandRouteChain(start, end, waypoints);
-        const merged = await this.calculateChainedRoute(chain, profile);
+        const merged = await this.calculateChainedRoute(chain, profile, signal);
         this.emitProgress({
           phase: 'done',
           label:
@@ -179,7 +187,10 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
         return [merged];
       }
 
-      await this.ensureRoadGraph(start, end, { requireCoverage: false });
+      await this.ensureRoadGraph(start, end, {
+        requireCoverage: false,
+        signal,
+      });
 
       this.emitProgress({
         phase: 'calculating',
@@ -206,6 +217,7 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
       });
       return routes;
     } catch (e) {
+      if (isAbortError(e)) throw e;
       this.emitProgress({
         phase: 'error',
         label: e instanceof Error ? e.message : 'Routing failed',
@@ -213,19 +225,25 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
       });
       throw e;
     } finally {
-      window.setTimeout(() => this.emitProgress(idleProgress()), 400);
+      const finishedEpoch = epoch;
+      window.setTimeout(() => {
+        if (this.jobEpoch === finishedEpoch) this.emitProgress(idleProgress());
+      }, 400);
     }
   }
 
   /**
    * Route a chain of points leg-by-leg. Each hop downloads only its corridor.
-   * Synthetic vias are snapped onto the nearest loaded road so geodesic
-   * midpoints in empty fields still connect.
+   * The next hop's Overpass request is started before A* on the current hop,
+   * so the mirror can work while the search runs. Routing stays in order:
+   * hop N+1 begins at the snapped end of hop N.
    */
   private async calculateChainedRoute(
     chain: RouteChainPoint[],
     profile: RoutingProfileId,
+    signal?: AbortSignal,
   ): Promise<CalculatedRoute> {
+    throwIfAborted(signal);
     if (chain.length < 2) {
       throw new Error('Route chain needs at least start and end');
     }
@@ -233,28 +251,78 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
     const legs: CalculatedRoute[] = [];
     let cursor = chain[0]!.coordinate;
     const legCount = chain.length - 1;
+    const downloads = new Map<number, Promise<NetworkFeatureCollection>>();
+
+    const preload = (
+      legNumber: number,
+      from: Coordinate,
+      to: Coordinate,
+      report: boolean,
+    ) => {
+      if (downloads.has(legNumber) || legNumber < 1 || legNumber > legCount) {
+        return;
+      }
+      const label = `Leg ${legNumber} of ${legCount} — loading roads…`;
+      const task = loadOsmNetworkForRoute(
+        from,
+        to,
+        [],
+        report
+          ? (progress) =>
+              this.emitProgress({
+                ...progress,
+                label,
+              })
+          : undefined,
+        signal,
+      );
+      // The hop may be abandoned (already covered, or an earlier hop failed).
+      // A handler here keeps that rejection from surfacing as unhandled.
+      void task.catch(() => {});
+      downloads.set(legNumber, task);
+    };
+
+    preload(1, chain[0]!.coordinate, chain[1]!.coordinate, true);
+    if (legCount > 1) {
+      preload(2, chain[1]!.coordinate, chain[2]!.coordinate, false);
+    }
 
     for (let i = 1; i < chain.length; i++) {
+      throwIfAborted(signal);
       const stop = chain[i]!;
       const legIndex = i;
+      const maxSnap = stop.synthetic ? 12_000 : 2_500;
+      const label = `Leg ${legIndex} of ${legCount} — loading roads…`;
+
+      if (i + 1 <= legCount) {
+        preload(i + 1, chain[i]!.coordinate, chain[i + 1]!.coordinate, false);
+      }
+
       this.emitProgress({
         phase: 'downloading-roads',
-        label: `Leg ${legIndex} of ${legCount} — loading roads…`,
+        label,
         percent:
           legCount > 1
             ? Math.round(((legIndex - 1) / legCount) * 100)
             : null,
       });
 
-      await this.ensureRoadGraph(cursor, stop.coordinate, {
-        progressLabel: `Leg ${legIndex} of ${legCount} — loading roads…`,
-        requireCoverage: !stop.synthetic,
+      const prefetchFrom = chain[i - 1]!.coordinate;
+      const prefetchMatchesCursor =
+        prefetchFrom[0] === cursor[0] && prefetchFrom[1] === cursor[1];
+
+      await this.loadPrefetchedCorridor(cursor, stop.coordinate, {
+        signal,
+        progressLabel: label,
+        prefetched: downloads.get(legIndex),
+        refetchOnMiss: !prefetchMatchesCursor,
+        maxSnapMeters: maxSnap,
       });
 
       const snapped = this.snapRoutingEndpoints(
         cursor,
         stop.coordinate,
-        stop.synthetic ? 12_000 : 2_500,
+        maxSnap,
       );
 
       this.emitProgress({
@@ -267,11 +335,9 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
       });
 
       legs.push(
-        offlineGraphEngine.calculateRoute(
-          snapped.start,
-          snapped.end,
-          { profile },
-        ),
+        offlineGraphEngine.calculateRoute(snapped.start, snapped.end, {
+          profile,
+        }),
       );
       cursor = snapped.end;
     }
@@ -305,6 +371,84 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
     return { start: snappedStart, end: snappedEnd };
   }
 
+  /**
+   * Load a corridor that may already be downloading. If the pack was fetched
+   * along the geodesic and the snapped end of the previous hop sits outside
+   * it, discard that pack and download from the snapped point.
+   */
+  private async loadPrefetchedCorridor(
+    start: Coordinate,
+    end: Coordinate,
+    options: {
+      signal?: AbortSignal;
+      progressLabel: string;
+      prefetched?: Promise<NetworkFeatureCollection>;
+      refetchOnMiss: boolean;
+      maxSnapMeters: number;
+    },
+  ): Promise<void> {
+    throwIfAborted(options.signal);
+    // 350m, same as a normal hop — a wide snap here would treat the previous
+    // corridor as if it already reached the next town.
+    if (offlineGraphEngine.coversPoints(start, end)) {
+      this.emitProgress({
+        phase: 'checking-cache',
+        label: 'Using loaded roads',
+        percent: 100,
+      });
+      return;
+    }
+
+    const onProgress = (progress: RoutingProgress) =>
+      this.emitProgress({
+        ...progress,
+        label: options.progressLabel,
+      });
+
+    let collection = options.prefetched
+      ? await options.prefetched
+      : await loadOsmNetworkForRoute(start, end, [], onProgress, options.signal);
+    throwIfAborted(options.signal);
+    this.applyRoadCollection(collection);
+
+    if (
+      options.refetchOnMiss &&
+      !this.corridorCovers(start, end, options.maxSnapMeters)
+    ) {
+      collection = await loadOsmNetworkForRoute(
+        start,
+        end,
+        [],
+        onProgress,
+        options.signal,
+      );
+      this.applyRoadCollection(collection);
+    }
+  }
+
+  private corridorCovers(
+    start: Coordinate,
+    end: Coordinate,
+    maxMeters: number,
+  ): boolean {
+    return (
+      offlineGraphEngine.nearestRoadCoordinate(start, maxMeters) != null &&
+      offlineGraphEngine.nearestRoadCoordinate(end, maxMeters) != null
+    );
+  }
+
+  private applyRoadCollection(collection: NetworkFeatureCollection): void {
+    offlineGraphEngine.loadFeatureCollection(collection);
+    this.setStatus({
+      kind: 'graph',
+      ready: true,
+      label: collection.region?.label ?? 'OSM road graph',
+      network: offlineGraphEngine.getMeta(),
+      attribution: collection.attribution,
+      message: `Routing on ${collection.features.length} OSM ways`,
+    });
+  }
+
   private async ensureRoadGraph(
     start: Coordinate,
     end: Coordinate,
@@ -313,9 +457,11 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
       waypoints?: Coordinate[];
       /** When false, coverage is checked via snapRoutingEndpoints later. */
       requireCoverage?: boolean;
+      signal?: AbortSignal;
     } = {},
   ): Promise<void> {
     const requireCoverage = options.requireCoverage !== false;
+    throwIfAborted(options.signal);
 
     if (offlineGraphEngine.coversPoints(start, end)) {
       this.emitProgress({
@@ -342,17 +488,9 @@ export class OfflineRoutingAdapter implements RoutingAdapter {
           ...progress,
           label: options.progressLabel ?? progress.label,
         }),
+      options.signal,
     );
-    offlineGraphEngine.loadFeatureCollection(collection);
-
-    this.setStatus({
-      kind: 'graph',
-      ready: true,
-      label: collection.region?.label ?? 'OSM road graph',
-      network: offlineGraphEngine.getMeta(),
-      attribution: collection.attribution,
-      message: `Routing on ${collection.features.length} OSM ways`,
-    });
+    this.applyRoadCollection(collection);
 
     if (requireCoverage && !offlineGraphEngine.coversPoints(start, end)) {
       const soft =

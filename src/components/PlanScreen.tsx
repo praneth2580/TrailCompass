@@ -26,6 +26,7 @@ interface PlanScreenProps {
   planning: boolean;
   onPreview: () => void;
   onStart: () => void;
+  onClear: () => void;
   onRequestMapPick: (kind: StopKind, mode: 'destination' | 'stop') => void;
 }
 
@@ -37,6 +38,7 @@ export function PlanScreen({
   planning,
   onPreview,
   onStart,
+  onClear,
   onRequestMapPick,
 }: PlanScreenProps) {
   const [itinerary, setItinerary] = useState<TripPlannerState>(
@@ -49,7 +51,7 @@ export function PlanScreen({
   useEffect(() => tripPlanner.subscribe(setItinerary), []);
 
   const { destination, stops } = itinerary;
-  const canPlan = Boolean(destination) && engineReady && !planning;
+  const canPreview = Boolean(destination) && engineReady;
   const hasRoute =
     Boolean(activeRoute) &&
     (nav.status === 'choosing' ||
@@ -183,7 +185,9 @@ export function PlanScreen({
       <section className="tc-plan-summary" aria-live="polite">
         {planning || nav.status === 'planning' ? (
           <p className="tc-plan-summary-line">
-            {nav.progress?.label ?? nav.message ?? 'Planning…'}
+            {nav.status === 'planning'
+              ? (nav.progress?.label ?? nav.message ?? 'Planning route…')
+              : 'Getting GPS…'}
           </p>
         ) : summaryRoute ? (
           <p className="tc-plan-summary-line">
@@ -215,11 +219,11 @@ export function PlanScreen({
         <button
           type="button"
           className="tc-plan-primary"
-          disabled={!canPlan}
+          disabled={!canPreview}
           onClick={onPreview}
         >
           {planning || nav.status === 'planning'
-            ? 'Planning…'
+            ? 'Preview again'
             : 'Preview on map'}
         </button>
         <button
@@ -234,7 +238,7 @@ export function PlanScreen({
           <button
             type="button"
             className="tc-plan-clear"
-            onClick={() => tripPlanner.clear()}
+            onClick={onClear}
           >
             Clear trip
           </button>
