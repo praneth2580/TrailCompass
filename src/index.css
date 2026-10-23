@@ -1037,6 +1037,13 @@ button.tc-plan-row:active {
   min-height: 2.4rem;
 }
 
+.tc-plan-search-form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.45rem;
+  align-items: stretch;
+}
+
 .tc-plan-search input {
   width: 100%;
   min-height: 2.85rem;

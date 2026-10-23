@@ -68,6 +68,7 @@ TrailCompass is an Android navigation app for motorcycle touring. It is a React 
 | UI | React 19, TypeScript 6 | Function components and hooks. No state library: services hold state and components subscribe to them. |
 | Build | Vite 8 | `base: './'` so asset paths resolve inside the Android WebView. Source maps are on. |
 | Lint | oxlint | `.oxlintrc.json`: react, typescript and oxc plugins; rules-of-hooks is an error. |
+| Tests | Vitest 4 | Unit tests for the routing code, next to it as `src/routing/*.test.ts`. Node environment. |
 | Native shell | Capacitor 7 | Plugins: Geolocation, Filesystem, Preferences, Share. |
 | Map | MapLibre GL JS 6 | Vector style from OpenFreeMap. The worker URL is set explicitly for Vite. |
 | Tiles (future) | `pmtiles` 4 | Installed, but not used yet. |
@@ -200,7 +201,7 @@ Refs: `previewToken` (cancels a stale preview), `planTripKey` (a JSON snapshot o
 #### Effects
 
 1. **Mount:** subscribe to all services; start GPS (`locationService.startWatching`), the compass, and the routing engine (`navigationService.ensureEngine`). There is also a `mapService.subscribeStatus` listener. Whenever the map finishes loading (including after you come back to the Map tab), it redraws the destination marker, stop markers and the current route via `navigationService.redrawMap()`. **This is needed because `MapView` unmounts when you leave the Map tab, and that destroys the MapLibre instance.**
-2. **On every fix:** `navigationService.updatePosition([lon, lat])` drives navigation.
+2. **On every fix:** `navigationService.updatePosition([lon, lat], accuracyMeters)` drives navigation.
 3. **Ride mode:** asks for browser fullscreen while in ride mode on the Map tab.
 4. **Trip-change guard:** while planning, if the itinerary or profile no longer matches `planTripKey`, the in-flight plan is cancelled. This stops a slow download from finishing for a trip the rider has already changed.
 5. **Toast auto-dismiss.**
@@ -292,7 +293,7 @@ A list-first trip builder.
 
 #### `StopPickerSheet.tsx`
 A search sheet for the destination or a custom stop.
-- Searches Nominatim as you type (320 ms debounce, minimum 2 characters), biased towards the GPS position. See §19 about Nominatim's usage policy.
+- Searches Nominatim only when the rider submits (Enter or the **Search** button; minimum 2 characters), biased towards the GPS position. Nominatim's usage policy forbids search-as-you-type, and `place-search.service.ts` also limits requests to one per second.
 - **Use my location** and **Pick on map** shortcuts.
 - Resets its fields when it opens, using a session-key comparison during render.
 
@@ -419,7 +420,7 @@ State: `{ destination: TripStop | null, stops: TripStop[], mapPick: MapPickReque
 Saves OSM road extracts so later plans can skip Overpass.
 
 - **Index:** Preferences key `road-pack-index` (array of IDs, newest first). **Metadata:** `road-pack-meta:<id>`. **Body:** `road-packs/<id>.json`, written through `storageManager`.
-- `findCoveringPack(points)` returns the first pack whose bounding box contains every point (with about 0.002° of padding).
+- `findCoveringPack(points)` returns the first pack whose bounding box contains every point (with about 0.002° of padding) **and** whose recorded `coverage` has roads there. A corridor pack only counts if every point is within 80 % of the corridor radius of one of its sample points (`routing/network-coverage.ts`). Packs saved before coverage was recorded are treated as full-bbox packs.
 - `saveFromCollection` is called after every new Overpass download. It skips collections over about 7.2 M characters and keeps at most **40 packs** (the oldest are deleted).
 - The label looks like `Roads · 48.86°, 2.30° · ~12 km · 834 ways`.
 
@@ -433,7 +434,7 @@ Saves OSM road extracts so later plans can skip Overpass.
 - `fuel` → `amenity=fuel`. `food` → `amenity ∈ {restaurant, cafe, fast_food, food_court}`.
 - With a route: 8 evenly spaced sample points, with an `around:` query on nodes and ways at each. Otherwise a single `around:` query at `near`.
 - Removes duplicates by coordinate, names each place from `name`, then `brand`, then `operator`, then a default, and sorts by distance (from the route or from you).
-- Tries the two Overpass mirrors one after the other. It **does not** use the backoff or scheduler logic from the road loader.
+- Sends its query through the shared `fetchOverpass` client (§8.3), so it gets the same scheduler, mirror switching and backoff as road downloads.
 
 ### 7.10 `stop-suggest.service.ts` — smart stop suggestions
 
@@ -531,12 +532,12 @@ It re-exports `offlineRoutingAdapter` as `defaultRoutingAdapter`. `NavigationSer
    - Span ≥ 25 km: a **corridor** query, made of `around:4000` circles at sample points every 12 km along the great circle (at most 12 circles). This avoids downloading a huge diagonal box for a long thin leg.
    - Road classes: `motorway` to `service`, plus `*_link`, excluding `area=yes`.
 3. **Cache layers:** an in-memory `Map` (24 entries; the key is the bbox or the corridor points), then `roadPackService.findCoveringPack` (disk), then Overpass.
-4. **`fetchOverpass`:** up to 4 attempts, alternating between `overpass-api.de` and `overpass.kumi.systems`. Each attempt first gets a slot from `overpassScheduler`.
+4. **`fetchOverpass`** (in `overpass-client.ts`, shared with the POI search): up to 4 attempts, alternating between `overpass-api.de` and `overpass.kumi.systems`. Each attempt first gets a slot from `overpassScheduler`.
    - HTTP 429, 502, 503 or 504: marks the mirror as overloaded and waits for `Retry-After` (at most 30 s) or the backoff.
    - Other HTTP errors, bad JSON, or network errors: back off and switch mirror.
    - Backoff: 2 s, 4 s, 8 s (maximum 8 s). The wait can be aborted.
 5. **Download progress:** if `Content-Length` is present, the body is read as a stream and real byte progress is reported. Otherwise the progress is indeterminate.
-6. **Conversion (`overpassToNetwork`):** ways with geometry become GeoJSON `LineString` features with `highway`, `oneway`, `name` and `osm_id`. Ways tagged `access=no` or `private`, `motor_vehicle=no` or `motorcycle=no` are dropped.
+6. **Conversion (`overpassToNetwork`):** ways with geometry become GeoJSON `LineString` features with `highway`, `oneway`, `name` and `osm_id`. Ways tagged `access=no` or `private`, `motor_vehicle=no` or `motorcycle=no` are dropped. The collection's `region.coverage` records what was really downloaded: `{kind: 'bbox'}`, or `{kind: 'corridor', samples, radiusMeters}` for corridor queries.
 7. The result is cached and saved as a road pack in the background.
 
 ### 8.4 `overpass-scheduler.ts` — limiting concurrent requests (uncommitted)
@@ -564,10 +565,11 @@ These are used throughout the loader, the adapter and the navigation service, so
 - One-way handling: `oneway=yes|true|1` creates only the forward edge. `oneway=-1` creates only the reverse edge. `motorway`, `motorway_link` and `trunk_link` are treated as one-way when they have no tag.
 - Edge IDs are `${osm_id}:${segmentIndex}:fwd|rev`.
 
-**Snapping:** `snapToNearestNode` checks every node (a linear scan). `coversPoints` requires both ends to be within 350 m of a road. `nearestRoadCoordinate(point, max)` is used for the wider 2.5 km and 12 km snaps.
+**Snapping:** nodes are also bucketed in a grid of 0.005° cells. `snapToNearestNode(point, maxMeters)` searches rings of cells outward from the point's cell and stops once no farther ring can hold a closer node, or the ring is beyond `maxMeters`. `coversPoints` requires both ends to be within 350 m of a road. `nearestRoadCoordinate(point, max)` is used for the wider 2.5 km and 12 km snaps.
 
 **Search (`aStar`)**
-- The heuristic is the straight-line distance to the goal in metres. The open set is a `Set`, and the minimum f-score is found by scanning it each step (no priority queue).
+- The heuristic is the straight-line distance to the goal multiplied by `minCostPerMeter(profile)`, the cheapest cost any edge can have per metre under that profile. This never overestimates, so the first route found is the cheapest. Without the scaling, "fastest" could settle on a slow street over a cheaper motorway.
+- The open set is a binary min-heap (`min-heap.ts`). A node can be pushed again with a better score; outdated entries are skipped when popped, and settled nodes are kept in a closed set.
 - The edge cost comes from `edgeCostMeters(meters, highway, profile)` multiplied by any penalty on that edge.
 
 **Alternatives (`calculateRoutes`)**
@@ -603,7 +605,9 @@ Walks the route coordinates and measures the change in bearing at each point:
 
 - `selectNextInstruction(instructions, alongMeters)` returns the first instruction whose running-total distance is greater than `alongMeters`.
 - `formatInstructionBanner` produces `"1.2 km — Turn left"`.
-- `matchPositionToRoute(pos, route, 50 m)` finds the nearest route **coordinate** and sets `offRoute` if it is more than 50 m away.
+- `selectNextInstructionIndex(instructions, alongMeters)` returns the instruction's index and where its maneuver sits along the route, so two identical instructions are never confused.
+- `matchPositionToRoute(pos, route, {accuracyMeters})` finds the closest point on the route's **segments** (via `projectOntoPolyline`) and sets `offRoute` if the rider is farther than `max(50 m, 1.5 × GPS accuracy)`.
+- Route-following helpers in the same file: `waypointPositionsAlong` (where each stop sits along the route, searched in visit order), `countPassedWaypoints`, and `remainingDurationSeconds` (planned duration scaled by the share of distance left).
 
 ### 8.10 `geo.ts` — geometry helpers
 
@@ -639,7 +643,7 @@ Walks the route coordinates and measures the change in bearing at each point:
 ### 8.14 `valhalla-adapter.ts` — optional Valhalla WASM
 
 - Loads `@jansoft/mbujkanji-valhalla-wasm` with a dynamic import, then `createRouter()`, `init()`, and `loadTilesFromUrl()` (or fetches the file and calls `loadTiles()`).
-- Requests use `costing: 'motorcycle'` and `directions_type: 'maneuvers'`. The response shape is decoded as a **polyline with 6-digit precision**. Distance and time come from the leg summary.
+- Requests use `costing: 'motorcycle'` and `directions_type: 'maneuvers'`. Valhalla returns one leg per hop between stops. Each leg's shape is decoded as a **polyline with 6-digit precision**, its distance and time come from the leg summary, and the legs are joined with `mergeRoutes` (`route-merge.ts`).
 - Uses Valhalla's own maneuver text when present. Otherwise it generates instructions from the geometry.
 - Type declarations are in `src/types/valhalla-wasm.d.ts`.
 
@@ -708,12 +712,13 @@ Walks the route coordinates and measures the change in bearing at each point:
 ### 9.3 The follow loop (`updatePosition` → `followRoute`)
 
 On every GPS fix while navigating:
-1. `distanceAlongPolylineMeters` finds the nearest route coordinate and the distance along the route up to it.
-2. `matchPositionToRoute` gives the distance from the route (to the nearest coordinate).
-3. **Arrival:** within 25 m of the route **and** less than 50 m remaining → `arrived`, and the route is cleared.
-4. **Next instruction:** `selectNextInstruction(instructions, along)`. The distance to it comes from `distanceToInstructionEnd`, which finds the instruction by matching its text and distance.
-5. **Off route** (more than 50 m away): the state is flagged and `tryReroute(position)` is called.
-6. Otherwise, the state is updated with the remaining distance and **ETA = remaining ÷ 11 m/s** (about 40 km/h).
+1. `matchPositionToRoute` projects the rider onto the closest route segment. This gives the distance from the road, the distance along the route, and the remaining distance (`remainingFromProjectionMeters`).
+2. **Arrival:** within 25 m of the route **and** less than 50 m remaining → `arrived`, and the route is cleared.
+3. **Off-route counter:** a fix beyond the threshold (§8.9) adds to a counter; a fix on the route resets it. Fixes with accuracy worse than 100 m change neither. Only **2 consecutive** off-route fixes count as off route.
+4. **Visited stops:** while on the route, stops the rider is at least 30 m past are dropped from `waypoints`, so a later reroute does not send them back.
+5. **Next instruction:** `selectNextInstructionIndex(instructions, along)`; the distance to the turn is that maneuver's position minus the rider's.
+6. **Off route** (confirmed): the state is flagged and `tryReroute(position)` is called. While a reroute is running, the status stays `rerouting` so its progress stays visible.
+7. Otherwise, the state is updated with the remaining distance and **ETA = planned duration × remaining ÷ route length**.
 
 ### 9.4 Rerouting and cancellation
 
@@ -849,6 +854,7 @@ Turns on an immersive map view automatically once the bike is clearly moving dur
 | `dev` | Vite dev server (`host: true`, so phones on your LAN can reach it) |
 | `build` | `tsc -b && vite build` → `dist/` |
 | `lint` | oxlint |
+| `test` | `vitest run` (unit tests) |
 | `preview` | Serves the built `dist/` |
 | `cap:sync` | build + `npx cap sync android` |
 | `cap:build` | sync + Gradle `assembleDebug` (through `android-build.mjs`) |
@@ -910,34 +916,30 @@ So today the app runs routing on the phone, but it is **not** a fully offline ap
 
 These came up while reading the code for this guide. Each one points to the relevant code. Nothing here has been confirmed on a device.
 
-### Navigation accuracy
+### Fixed on 2026-10-23
 
-1. **Off-route detection measures distance to route coordinates, not to the road between them.** `matchPositionToRoute` ([route-matcher.ts](../src/routing/route-matcher.ts)) and `distanceAlongPolylineMeters` ([geo.ts](../src/routing/geo.ts)) use the nearest route *coordinate*. On straight rural roads, OSM nodes can be hundreds of metres apart. A rider halfway between two nodes can be more than 50 m from both, which triggers a false "Off route" and a reroute every 8 s. Measuring the distance to each segment would fix this. The same problem makes the "distance to next turn" less precise.
-2. **Rerouting sends you back through stops you have already passed.** [navigation.service.ts:575](../src/services/navigation.service.ts#L575) reroutes through all `this.waypoints`. The comment above it says "keep remaining waypoints ahead of the rider", but there is no filtering.
-3. **The ETA during navigation uses a fixed 11 m/s** ([navigation.service.ts:536](../src/services/navigation.service.ts#L536)). It ignores the route type and road classes, so after the first GPS update it can differ a lot from the planned ETA.
-4. **`distanceToInstructionEnd` finds the instruction by its text and distance** ([navigation.service.ts:760](../src/services/navigation.service.ts#L760)). If two instructions have the same text and distance, it picks the first one. Tracking the instruction's index would be more reliable.
-5. **Valhalla routes with waypoints keep only the first leg** ([valhalla-adapter.ts:109](../src/routing/valhalla-adapter.ts#L109) reads `legs[0]`). Valhalla also ignores the route type and always returns a single route.
+Each fix below is covered by tests in `src/routing/*.test.ts` (`npm test`).
 
-### Routing engine
+- **Off-route detection** now measures against route segments, not just their points, and allows for GPS accuracy. It needs two consecutive off-route fixes before rerouting (`geo.ts` `projectOntoPolyline`, `route-matcher.ts`).
+- **Rerouting no longer sends you back to stops you have passed.** Visited stops are dropped during navigation (`navigation.service.ts` `dropPassedWaypoints`).
+- **The navigation ETA** now scales the route's planned duration instead of using a fixed 11 m/s.
+- **The next instruction is tracked by index**, so identical instructions are no longer confused (`selectNextInstructionIndex`).
+- **Valhalla routes with stops keep every leg** (`valhalla-adapter.ts`, `route-merge.ts`).
+- **The A\* heuristic is scaled** so it never overestimates, and the search uses a binary heap and grid-indexed snapping (`graph-engine.ts`, `min-heap.ts`).
+- **Corridor road packs record their real coverage**, so they are no longer reused for points far from the corridor (`network-coverage.ts`).
+- **POI requests use the shared Overpass client**, with its scheduler and backoff (`overpass-client.ts`).
+- **Place search runs on submit only**, at no more than one request per second.
 
-6. **The A\* heuristic can overestimate for `fastest` and `less_traffic`.** It is straight-line distance in metres. But a `fastest` edge costs about 0.36–2 per metre, and a residential edge in `less_traffic` costs 0.85 per metre. When the heuristic is higher than the true remaining cost, A\* is not guaranteed to find the best route. Routes are still valid, but may not be optimal. Scaling the heuristic by the lowest cost per metre for the profile would fix this.
-7. **Performance does not scale well.** Snapping scans every node ([graph-engine.ts:367](../src/routing/graph-engine.ts#L367)), and A\* scans the whole open set each step ([graph-engine.ts:391](../src/routing/graph-engine.ts#L391)). This is fine for the current corridors, but larger graphs (for example a future regional pack) will need a binary heap and a spatial index.
-8. **Corridor road packs record a bounding box larger than the area they actually contain.** For legs of 25 km or more, the download covers only 4 km around the route line, but `overpassToNetwork` stores the full padded bbox ([osm-network-loader.ts](../src/routing/osm-network-loader.ts)). Later, `findCoveringPack` can choose that pack for points inside the bbox but far from the corridor. Snapping then fails ("Could not snap onto downloaded roads") instead of downloading the right roads.
-9. **POI and stop-suggestion requests do not use the Overpass scheduler or backoff** ([poi-search.service.ts:126](../src/services/poi-search.service.ts#L126)). A long trip makes one request per fuel checkpoint, one after another ([stop-suggest.service.ts:163](../src/services/stop-suggest.service.ts#L163)), so 429 errors are likely.
+### Still open
 
-### Sensors and platform
-
-10. **On Android the compass likely shows relative, not magnetic, heading.** The service listens only to `deviceorientation`. Chrome and WebView provide true-north readings on `deviceorientationabsolute` ([compass.service.ts:76](../src/services/compass.service.ts#L76)).
-11. **There is no background location.** Without a foreground service or background permission, the WebView may stop receiving GPS updates when the screen locks.
-12. **Trip and navigation state is lost on restart.** Only saved routes and road packs survive.
-
-### Policy and tooling
-
-13. **Search-as-you-type on Nominatim breaks the OSM Nominatim usage policy.** The policy forbids client-side autocomplete and allows at most 1 request per second. `StopPickerSheet` searches 320 ms after each keystroke. Searching on submit, or using a different geocoder, would fix this.
-14. **`sharp` is not a declared dependency.** `generate-icons.mjs` needs it, but today it is installed only indirectly (through `@jansoft/mbujkanji-valhalla-wasm` → `next`). Add it to `devDependencies`.
-15. **`release.mjs` needs `android/app/src/main/res/xml/config.xml`, which is gitignored.** It exists only after a `cap sync`, so a fresh clone fails at the version-bump step. The script also supports a token embedded in the `origin` URL, which means storing a credential in `.git/config`.
-16. **Placeholder app ID** `com.example.trailcompass` (see §16.1).
-17. **README is out of date** (milestones, repository layout, "no routing yet").
+1. **Valhalla ignores the route type** and always returns a single route, using `motorcycle` costing.
+2. **On Android the compass likely shows relative, not magnetic, heading.** The service listens only to `deviceorientation`. Chrome and WebView provide true-north readings on `deviceorientationabsolute` ([compass.service.ts:76](../src/services/compass.service.ts#L76)).
+3. **There is no background location.** Without a foreground service or background permission, the WebView may stop receiving GPS updates when the screen locks.
+4. **Trip and navigation state is lost on restart.** Only saved routes and road packs survive.
+5. **`sharp` is not a declared dependency.** `generate-icons.mjs` needs it, but today it is installed only indirectly (through `@jansoft/mbujkanji-valhalla-wasm` → `next`). Add it to `devDependencies`.
+6. **`release.mjs` needs `android/app/src/main/res/xml/config.xml`, which is gitignored.** It exists only after a `cap sync`, so a fresh clone fails at the version-bump step. The script also supports a token embedded in the `origin` URL, which means storing a credential in `.git/config`.
+7. **Placeholder app ID** `com.example.trailcompass` (see §16.1), and releases ship a debug APK.
+8. **README is out of date** (milestones, repository layout, "no routing yet").
 
 ---
 
@@ -950,9 +952,10 @@ npm install
 # Web dev (UI work; GPS needs https or localhost)
 npm run dev
 
-# Type-check + build
+# Type-check + build, lint, unit tests (Vitest)
 npm run build
 npm run lint
+npm test
 
 # Android: build, sync, assemble, install, launch (JDK 21 + Android SDK required)
 npm run cap:run

@@ -1,6 +1,7 @@
 import type { CalculatedRoute, Coordinate, RoutingAdapter } from './routing-adapter';
 import { buildManeuversFromPath } from './maneuver-builder';
 import { polylineLengthMeters } from './geo';
+import { mergeRoutes } from './route-merge';
 
 export interface ValhallaEngineHandle {
   ready: boolean;
@@ -106,36 +107,17 @@ export class ValhallaOfflineAdapter implements RoutingAdapter {
       directions_type: 'maneuvers',
     });
 
-    const leg = result.trip?.legs?.[0];
-    if (!leg) {
+    // One leg per hop between locations; each stop starts a new leg.
+    const legs = result.trip?.legs ?? [];
+    if (legs.length === 0) {
       throw new Error('Valhalla returned no route leg');
     }
 
-    const coordinates = decodePolyline6(leg.shape ?? '');
-    if (coordinates.length < 2) {
+    const route = mergeRoutes(legs.map(legToRoute));
+    if (route.coordinates.length < 2) {
       throw new Error('Valhalla route shape was empty');
     }
-
-    const distanceMeters =
-      (leg.summary?.length ?? result.trip?.summary?.length ?? 0) * 1000 ||
-      polylineLengthMeters(coordinates);
-    const durationSeconds = Math.round(
-      leg.summary?.time ?? result.trip?.summary?.time ?? distanceMeters / 11,
-    );
-
-    const instructions =
-      leg.maneuvers?.map((m) => ({
-        text: m.instruction ?? 'Continue',
-        distanceMeters: Math.round((m.length ?? 0) * 1000),
-        maneuver: String(m.type ?? 'maneuver'),
-      })) ?? buildManeuversFromPath(coordinates);
-
-    return {
-      coordinates,
-      distanceMeters,
-      durationSeconds,
-      instructions,
-    };
+    return route;
   }
 
   dispose(): void {
@@ -143,6 +125,27 @@ export class ValhallaOfflineAdapter implements RoutingAdapter {
     this.router = null;
     this.tilesLoaded = false;
   }
+}
+
+type ValhallaLeg = {
+  shape?: string;
+  summary?: { length?: number; time?: number };
+  maneuvers?: Array<{ instruction?: string; length?: number; type?: number }>;
+};
+
+function legToRoute(leg: ValhallaLeg): CalculatedRoute {
+  const coordinates = decodePolyline6(leg.shape ?? '');
+  // Valhalla reports lengths in kilometers.
+  const distanceMeters =
+    (leg.summary?.length ?? 0) * 1000 || polylineLengthMeters(coordinates);
+  const durationSeconds = Math.round(leg.summary?.time ?? distanceMeters / 11);
+  const instructions =
+    leg.maneuvers?.map((m) => ({
+      text: m.instruction ?? 'Continue',
+      distanceMeters: Math.round((m.length ?? 0) * 1000),
+      maneuver: String(m.type ?? 'maneuver'),
+    })) ?? buildManeuversFromPath(coordinates);
+  return { coordinates, distanceMeters, durationSeconds, instructions };
 }
 
 /** Google-encoded polyline with precision 1e-6 (Valhalla default). */

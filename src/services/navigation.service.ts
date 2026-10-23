@@ -5,12 +5,17 @@ import {
   type CalculatedRoute,
   type RoutingAdapter,
 } from '../routing/routing-adapter';
-import { matchPositionToRoute } from '../routing/route-matcher';
-import { selectNextInstruction } from '../routing/turn-instructions';
 import {
-  distanceAlongPolylineMeters,
-  remainingPolylineMeters,
-} from '../routing/geo';
+  countPassedWaypoints,
+  matchPositionToRoute,
+  remainingDurationSeconds,
+  waypointPositionsAlong,
+} from '../routing/route-matcher';
+import {
+  selectNextInstruction,
+  selectNextInstructionIndex,
+} from '../routing/turn-instructions';
+import { remainingFromProjectionMeters } from '../routing/geo';
 import { mapService } from './map.service';
 import { offlineRoutingAdapter } from '../routing/offline-adapter';
 import type { RoutingProgress } from '../routing/routing-progress';
@@ -30,6 +35,10 @@ export type PlanRouteResult = 'ready' | 'cancelled' | 'error';
 
 const ARRIVE_THRESHOLD_M = 25;
 const REROUTE_COOLDOWN_MS = 8_000;
+/** Consecutive off-route fixes needed before a reroute (one bad fix is noise). */
+const OFF_ROUTE_CONFIRM_FIXES = 2;
+/** Fixes worse than this cannot confirm or clear an off-route reading. */
+const MAX_TRUSTED_ACCURACY_M = 100;
 
 /**
  * Navigation orchestrator. Route calculation uses RoutingAdapter
@@ -51,6 +60,10 @@ export class NavigationService {
   private route: CalculatedRoute | null = null;
   private alternatives: CalculatedRoute[] = [];
   private lastPosition: Coordinate | null = null;
+  private lastAccuracyMeters: number | null = null;
+  private offRouteStreak = 0;
+  /** Distance along the active route to each remaining waypoint. */
+  private waypointAlong: number[] = [];
   private lastRerouteAt = 0;
   private listeners = new Set<NavigationListener>();
   private engineReady = false;
@@ -125,6 +138,7 @@ export class NavigationService {
   clearItinerary(): void {
     this.invalidateRouting();
     this.waypoints = [];
+    this.waypointAlong = [];
     this.route = null;
     this.alternatives = [];
     this.planningLink = null;
@@ -181,7 +195,7 @@ export class NavigationService {
   selectAlternative(index: number): void {
     const route = this.alternatives[index];
     if (!route) return;
-    this.route = route;
+    this.setActiveRoute(route);
     mapService.drawAlternatives(
       this.alternatives.map((r) => r.coordinates),
       index,
@@ -207,7 +221,7 @@ export class NavigationService {
     const route = this.alternatives[pick] ?? this.route;
     if (!route) return;
 
-    this.route = route;
+    this.setActiveRoute(route);
     mapService.drawAlternatives(
       this.alternatives.map((r) => r.coordinates),
       pick,
@@ -240,9 +254,9 @@ export class NavigationService {
    */
   loadSavedRoute(saved: SavedRoute): void {
     const calculated = savedToCalculatedRoute(saved);
-    this.route = calculated;
     this.alternatives = [calculated];
     this.waypoints = [...(saved.waypoints ?? [])];
+    this.setActiveRoute(calculated);
     if (saved.profile) this.profile = saved.profile;
 
     mapService.clearAlternatives();
@@ -376,6 +390,7 @@ export class NavigationService {
       if (!this.route) {
         throw new Error('No routes returned');
       }
+      this.setActiveRoute(this.route);
 
       this.planningLink = null;
       mapService.clearRecalcLink();
@@ -474,8 +489,9 @@ export class NavigationService {
     }
   }
 
-  updatePosition(position: Coordinate): void {
+  updatePosition(position: Coordinate, accuracyMeters?: number | null): void {
     this.lastPosition = position;
+    this.lastAccuracyMeters = accuracyMeters ?? null;
     if (!this.route) return;
 
     if (this.state.status === 'navigating' || this.state.status === 'rerouting') {
@@ -483,15 +499,30 @@ export class NavigationService {
     }
   }
 
-  private followRoute(position: Coordinate): void {
-    if (!this.route || !this.state.destination) return;
-
-    const along = distanceAlongPolylineMeters(position, this.route.coordinates);
-    const match = matchPositionToRoute(position, this.route.coordinates);
-    const remaining = remainingPolylineMeters(
-      this.route.coordinates,
-      Math.max(0, along.nearestIndex),
+  /** Make `route` the one being followed and re-anchor the stops on it. */
+  private setActiveRoute(route: CalculatedRoute): void {
+    this.route = route;
+    this.offRouteStreak = 0;
+    this.waypointAlong = waypointPositionsAlong(
+      this.waypoints,
+      route.coordinates,
     );
+  }
+
+  private followRoute(position: Coordinate): void {
+    const route = this.route;
+    if (!route || !this.state.destination) return;
+
+    const accuracy = this.lastAccuracyMeters;
+    const match = matchPositionToRoute(position, route.coordinates, {
+      accuracyMeters: accuracy,
+    });
+    const remaining = match.point
+      ? remainingFromProjectionMeters(route.coordinates, {
+          segmentIndex: match.nearestIndex,
+          point: match.point,
+        })
+      : route.distanceMeters;
 
     if (
       match.distanceMeters <= ARRIVE_THRESHOLD_M &&
@@ -501,22 +532,31 @@ export class NavigationService {
       return;
     }
 
-    const next = selectNextInstruction(
-      this.route.instructions,
-      along.alongMeters,
+    // A poor fix can neither confirm nor clear an off-route reading.
+    if (accuracy == null || accuracy <= MAX_TRUSTED_ACCURACY_M) {
+      this.offRouteStreak = match.offRoute ? this.offRouteStreak + 1 : 0;
+    }
+    const offRoute = this.offRouteStreak >= OFF_ROUTE_CONFIRM_FIXES;
+
+    if (!match.offRoute) this.dropPassedWaypoints(match.alongMeters);
+
+    const step = selectNextInstructionIndex(
+      route.instructions,
+      match.alongMeters,
     );
-
-    const distanceToNext = next
-      ? Math.max(
-          0,
-          distanceToInstructionEnd(along.alongMeters, next, this.route),
-        )
+    const next = step ? route.instructions[step.index] : undefined;
+    const distanceToNext = step
+      ? Math.max(0, step.endAlongMeters - match.alongMeters)
       : remaining;
+    // Keep 'rerouting' while a recalculation is in flight so its progress stays visible.
+    const status =
+      this.state.status === 'rerouting' ? 'rerouting' : 'navigating';
 
-    if (match.offRoute) {
+    if (offRoute) {
       this.setState({
         ...this.state,
-        status: 'navigating',
+        status,
+        waypoints: this.waypoints,
         currentInstruction: next,
         distanceToNextManeuverMeters: distanceToNext,
         remainingDistanceMeters: remaining,
@@ -529,14 +569,23 @@ export class NavigationService {
 
     this.setState({
       ...this.state,
-      status: 'navigating',
+      status,
+      waypoints: this.waypoints,
       currentInstruction: next,
       distanceToNextManeuverMeters: distanceToNext,
       remainingDistanceMeters: remaining,
-      remainingDurationSeconds: Math.round(remaining / 11),
+      remainingDurationSeconds: remainingDurationSeconds(route, remaining),
       offRoute: false,
-      message: undefined,
+      message: status === 'rerouting' ? this.state.message : undefined,
     });
+  }
+
+  /** Forget stops the rider has ridden past, so a reroute skips them. */
+  private dropPassedWaypoints(alongMeters: number): void {
+    const passed = countPassedWaypoints(this.waypointAlong, alongMeters);
+    if (passed === 0) return;
+    this.waypoints = this.waypoints.slice(passed);
+    this.waypointAlong = this.waypointAlong.slice(passed);
   }
 
   private async tryReroute(position: Coordinate): Promise<void> {
@@ -571,7 +620,7 @@ export class NavigationService {
     const unsubProgress = this.bindProgress(token);
 
     try {
-      // Keep remaining waypoints ahead of the rider when possible.
+      // followRoute drops stops already ridden past, so these are all ahead.
       const remainingWaypoints = this.waypoints;
       const options = {
         profile: this.profile,
@@ -589,6 +638,7 @@ export class NavigationService {
       this.planningLink = null;
       this.route = this.alternatives[0] ?? null;
       if (!this.route) throw new Error('No routes returned');
+      this.setActiveRoute(this.route);
 
       mapService.clearGhostRoute();
       mapService.clearRecalcLink();
@@ -755,24 +805,6 @@ export class NavigationService {
       listener(state);
     }
   }
-}
-
-function distanceToInstructionEnd(
-  alongMeters: number,
-  instruction: { distanceMeters: number; text: string },
-  route: CalculatedRoute,
-): number {
-  let cumulative = 0;
-  for (const step of route.instructions) {
-    cumulative += step.distanceMeters;
-    if (
-      step.text === instruction.text &&
-      step.distanceMeters === instruction.distanceMeters
-    ) {
-      return Math.max(0, cumulative - alongMeters);
-    }
-  }
-  return instruction.distanceMeters;
 }
 
 export const navigationService = new NavigationService();

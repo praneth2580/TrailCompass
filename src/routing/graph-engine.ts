@@ -3,16 +3,23 @@ import {
   haversineMeters,
   keyForCoordinate,
   polylineLengthMeters,
+  toRad,
 } from './geo';
 import { buildManeuversFromPath } from './maneuver-builder';
+import { MinHeap } from './min-heap';
+import type { NetworkCoverage } from './network-coverage';
 import {
   edgeCostMeters,
   estimateDurationSeconds,
+  minCostPerMeter,
   type RoutingProfileId,
 } from './routing-profiles';
 
 /** Snap tolerance onto the loaded road graph. */
 const ON_ROAD_SNAP_MAX_M = 350;
+/** Grid cell size for the snapping index (~550 m of latitude). */
+const SNAP_CELL_DEG = 0.005;
+const METERS_PER_DEG = 111_320;
 /** How many distinct alternatives to search for (including the best). */
 const MAX_ALTERNATIVES = 3;
 /** Reject an alternative if it reuses too much of a previous path. */
@@ -46,6 +53,7 @@ export interface NetworkFeatureCollection {
     id?: string;
     label?: string;
     bbox?: [number, number, number, number];
+    coverage?: NetworkCoverage;
   };
   features: NetworkFeature[];
 }
@@ -84,6 +92,9 @@ export interface RouteOptions {
  */
 export class OfflineGraphEngine {
   private nodes = new Map<string, GraphNode>();
+  /** Node keys bucketed by grid cell, so snapping avoids a full scan. */
+  private grid = new Map<string, string[]>();
+  private gridBounds = emptyGridBounds();
   private ready = false;
   private meta: RoutingNetworkMeta = {
     id: 'none',
@@ -103,13 +114,9 @@ export class OfflineGraphEngine {
 
   coversPoints(start: Coordinate, end: Coordinate): boolean {
     if (!this.isReady()) return false;
-    const a = this.snapToNearestNode(start);
-    const b = this.snapToNearestNode(end);
     return (
-      a != null &&
-      b != null &&
-      a.distanceMeters <= ON_ROAD_SNAP_MAX_M &&
-      b.distanceMeters <= ON_ROAD_SNAP_MAX_M
+      this.snapToNearestNode(start, ON_ROAD_SNAP_MAX_M) != null &&
+      this.snapToNearestNode(end, ON_ROAD_SNAP_MAX_M) != null
     );
   }
 
@@ -122,8 +129,8 @@ export class OfflineGraphEngine {
     maxMeters = 8_000,
   ): Coordinate | null {
     if (!this.isReady()) return null;
-    const snap = this.snapToNearestNode(point);
-    if (!snap || snap.distanceMeters > maxMeters) return null;
+    const snap = this.snapToNearestNode(point, maxMeters);
+    if (!snap) return null;
     return this.nodes.get(snap.key)?.coordinate ?? null;
   }
 
@@ -132,6 +139,8 @@ export class OfflineGraphEngine {
     meta?: Partial<RoutingNetworkMeta>,
   ): void {
     this.nodes.clear();
+    this.grid.clear();
+    this.gridBounds = emptyGridBounds();
     this.ready = false;
 
     for (const feature of collection.features) {
@@ -197,15 +206,12 @@ export class OfflineGraphEngine {
       Math.max(1, options.alternatives ?? MAX_ALTERNATIVES),
     );
 
-    const startSnap = this.snapToNearestNode(start);
-    const endSnap = this.snapToNearestNode(end);
-    if (!startSnap || !endSnap) {
-      throw new Error('Could not snap start/end onto roads');
-    }
-    if (startSnap.distanceMeters > ON_ROAD_SNAP_MAX_M) {
+    const startSnap = this.snapToNearestNode(start, ON_ROAD_SNAP_MAX_M);
+    if (!startSnap) {
       throw new Error('Start is too far from the nearest road');
     }
-    if (endSnap.distanceMeters > ON_ROAD_SNAP_MAX_M) {
+    const endSnap = this.snapToNearestNode(end, ON_ROAD_SNAP_MAX_M);
+    if (!endSnap) {
       throw new Error('Destination is too far from the nearest road');
     }
 
@@ -354,24 +360,67 @@ export class OfflineGraphEngine {
   }
 
   private ensureNode(key: string, coordinate: Coordinate): void {
-    if (!this.nodes.has(key)) {
-      this.nodes.set(key, { coordinate, edges: [] });
-    }
+    if (this.nodes.has(key)) return;
+    this.nodes.set(key, { coordinate, edges: [] });
+
+    const x = snapCell(coordinate[0]);
+    const y = snapCell(coordinate[1]);
+    const cell = cellKey(x, y);
+    const bucket = this.grid.get(cell);
+    if (bucket) bucket.push(key);
+    else this.grid.set(cell, [key]);
+
+    const bounds = this.gridBounds;
+    bounds.minX = Math.min(bounds.minX, x);
+    bounds.maxX = Math.max(bounds.maxX, x);
+    bounds.minY = Math.min(bounds.minY, y);
+    bounds.maxY = Math.max(bounds.maxY, y);
   }
 
+  /**
+   * Nearest node within `maxMeters`, searching grid rings outward from the
+   * point's cell and stopping once no farther ring can beat the best hit.
+   */
   private snapToNearestNode(
     point: Coordinate,
+    maxMeters: number,
   ): { key: string; distanceMeters: number } | null {
+    if (this.grid.size === 0) return null;
+
+    const cx = snapCell(point[0]);
+    const cy = snapCell(point[1]);
+    const bounds = this.gridBounds;
+    const maxRing = Math.max(
+      Math.abs(cx - bounds.minX),
+      Math.abs(cx - bounds.maxX),
+      Math.abs(cy - bounds.minY),
+      Math.abs(cy - bounds.maxY),
+    );
+    // Narrowest cell side near this latitude (longitude shrinks toward the poles).
+    const cellMeters =
+      SNAP_CELL_DEG *
+      METERS_PER_DEG *
+      Math.cos(toRad(Math.min(89, Math.abs(point[1]) + 1)));
+
     let bestKey: string | null = null;
     let best = Infinity;
-    for (const [key, node] of this.nodes) {
-      const d = haversineMeters(point, node.coordinate);
-      if (d < best) {
-        best = d;
-        bestKey = key;
+    for (let ring = 0; ring <= maxRing; ring++) {
+      // Any cell `ring` steps out is at least ring - 1 full cells away.
+      const ringFloorMeters = Math.max(0, ring - 1) * cellMeters;
+      if (ringFloorMeters > Math.min(best, maxMeters)) break;
+      for (const [x, y] of ringCells(cx, cy, ring)) {
+        const bucket = this.grid.get(cellKey(x, y));
+        if (!bucket) continue;
+        for (const key of bucket) {
+          const d = haversineMeters(point, this.nodes.get(key)!.coordinate);
+          if (d < best) {
+            best = d;
+            bestKey = key;
+          }
+        }
       }
     }
-    if (!bestKey) return null;
+    if (!bestKey || best > maxMeters) return null;
     return { key: bestKey, distanceMeters: best };
   }
 
@@ -388,41 +437,37 @@ export class OfflineGraphEngine {
     const endNode = this.nodes.get(endKey);
     if (!endNode) return null;
 
-    const open = new Set<string>([startKey]);
+    // Straight-line distance times the cheapest possible cost per meter never
+    // overestimates (and stays consistent, since edge lengths are haversine),
+    // so a node's first pop is its cheapest.
+    const costScale = minCostPerMeter(profile);
+    const heuristic = (coordinate: Coordinate) =>
+      haversineMeters(coordinate, endNode.coordinate) * costScale;
+
+    const open = new MinHeap<string>();
+    const closed = new Set<string>();
     const cameFrom = new Map<string, string>();
     const cameViaEdge = new Map<string, GraphEdge>();
     const gScore = new Map<string, number>([[startKey, 0]]);
-    const fScore = new Map<string, number>([
-      [
-        startKey,
-        haversineMeters(
-          this.nodes.get(startKey)!.coordinate,
-          endNode.coordinate,
-        ),
-      ],
-    ]);
+    open.push(startKey, heuristic(this.nodes.get(startKey)!.coordinate));
 
     while (open.size > 0) {
-      let current: string | null = null;
-      let bestF = Infinity;
-      for (const key of open) {
-        const f = fScore.get(key) ?? Infinity;
-        if (f < bestF) {
-          bestF = f;
-          current = key;
-        }
-      }
-      if (!current) break;
+      const current = open.pop()!.value;
+      // Stale heap entry: this node was already settled more cheaply.
+      if (closed.has(current)) continue;
       if (current === endKey) {
         return this.reconstructPath(cameFrom, cameViaEdge, current);
       }
+      closed.add(current);
 
-      open.delete(current);
       const node = this.nodes.get(current);
       if (!node) continue;
       const gCurrent = gScore.get(current) ?? Infinity;
 
       for (const edge of node.edges) {
+        if (closed.has(edge.to)) continue;
+        const neighbor = this.nodes.get(edge.to);
+        if (!neighbor) continue;
         const base = edgeCostMeters(edge.meters, edge.highway, profile);
         const penalty = penalized.get(edge.id) ?? 1;
         const tentative = gCurrent + base * penalty;
@@ -430,13 +475,7 @@ export class OfflineGraphEngine {
         cameFrom.set(edge.to, current);
         cameViaEdge.set(edge.to, edge);
         gScore.set(edge.to, tentative);
-        const neighbor = this.nodes.get(edge.to);
-        if (!neighbor) continue;
-        fScore.set(
-          edge.to,
-          tentative + haversineMeters(neighbor.coordinate, endNode.coordinate),
-        );
-        open.add(edge.to);
+        open.push(edge.to, tentative + heuristic(neighbor.coordinate));
       }
     }
 
@@ -487,6 +526,38 @@ export class OfflineGraphEngine {
       }
     }
     return coords;
+  }
+}
+
+function emptyGridBounds() {
+  return { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
+}
+
+function snapCell(degrees: number): number {
+  return Math.floor(degrees / SNAP_CELL_DEG);
+}
+
+function cellKey(x: number, y: number): string {
+  return `${x}:${y}`;
+}
+
+/** Cells exactly `ring` steps from (cx, cy) in Chebyshev distance. */
+function* ringCells(
+  cx: number,
+  cy: number,
+  ring: number,
+): Generator<[number, number]> {
+  if (ring === 0) {
+    yield [cx, cy];
+    return;
+  }
+  for (let dx = -ring; dx <= ring; dx++) {
+    yield [cx + dx, cy - ring];
+    yield [cx + dx, cy + ring];
+  }
+  for (let dy = -ring + 1; dy <= ring - 1; dy++) {
+    yield [cx - ring, cy + dy];
+    yield [cx + ring, cy + dy];
   }
 }
 

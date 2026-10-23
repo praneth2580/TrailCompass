@@ -1,5 +1,10 @@
 import type { Coordinate } from '../routing/routing-adapter';
 import type { NetworkFeatureCollection } from '../routing/graph-engine';
+import {
+  bboxCoversPoints,
+  coverageIncludesPoints,
+  type NetworkCoverage,
+} from '../routing/network-coverage';
 import { appDatabase } from '../database/database';
 import { storageManager } from '../offline/storage-manager';
 
@@ -19,6 +24,8 @@ export interface RoadPackMeta {
   /** Approximate serialized size in bytes. */
   bytes: number;
   cacheKey?: string;
+  /** Where the pack really has roads; absent on packs saved before this existed. */
+  coverage?: NetworkCoverage;
 }
 
 /**
@@ -52,7 +59,7 @@ export class RoadPackService {
     }
   }
 
-  /** First saved pack whose bbox covers every point (with small pad). */
+  /** First saved pack that has roads at every point (bbox plus corridor check). */
   async findCoveringPack(
     points: Coordinate[],
   ): Promise<{
@@ -63,6 +70,7 @@ export class RoadPackService {
     const packs = await this.listPacks();
     for (const meta of packs) {
       if (!bboxCoversPoints(meta.bbox, points, 0.002)) continue;
+      if (!coverageIncludesPoints(meta.coverage, points)) continue;
       const loaded = await this.getPack(meta.id);
       if (loaded) return loaded;
     }
@@ -92,6 +100,7 @@ export class RoadPackService {
       createdAt: new Date().toISOString(),
       bytes: json.length,
       cacheKey: options?.cacheKey,
+      coverage: collection.region?.coverage,
     };
 
     await storageManager.writeTextFile(`${PACK_DIR}/${id}.json`, json);
@@ -127,25 +136,6 @@ export class RoadPackService {
     }
     await appDatabase.setJson(INDEX_KEY, []);
   }
-}
-
-function bboxCoversPoints(
-  bbox: BBox,
-  points: Coordinate[],
-  padDeg: number,
-): boolean {
-  const [west, south, east, north] = bbox;
-  for (const [lng, lat] of points) {
-    if (
-      lng < west - padDeg ||
-      lng > east + padDeg ||
-      lat < south - padDeg ||
-      lat > north + padDeg
-    ) {
-      return false;
-    }
-  }
-  return true;
 }
 
 function labelForBbox(bbox: BBox, featureCount: number): string {

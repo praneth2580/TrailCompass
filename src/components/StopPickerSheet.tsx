@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import type { Coordinate } from '../routing/routing-adapter';
 import { searchPlaces } from '../services/place-search.service';
 import {
@@ -38,6 +38,8 @@ export function StopPickerSheet({
   const [hits, setHits] = useState<PlaceHit[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Bumped per search and on close, so a late reply cannot land in a newer session. */
+  const searchId = useRef(0);
 
   if (sessionKey !== session) {
     setSession(sessionKey);
@@ -47,40 +49,39 @@ export function StopPickerSheet({
     setError(null);
   }
 
-  useEffect(() => {
-    if (!open) return;
+  if (!open) return null;
+
+  // Search only on submit: Nominatim's usage policy forbids search-as-you-type.
+  const runSearch = () => {
     const trimmed = query.trim();
     if (trimmed.length < 2) {
+      setHits([]);
+      setError('Type at least 2 letters');
       return;
     }
+    const id = ++searchId.current;
+    setBusy(true);
+    setError(null);
+    void searchPlaces(trimmed, near ?? gpsCoordinate)
+      .then((results) => {
+        if (id !== searchId.current) return;
+        setHits(results);
+        setError(results.length === 0 ? 'No places found' : null);
+      })
+      .catch((e) => {
+        if (id !== searchId.current) return;
+        setHits([]);
+        setError(e instanceof Error ? e.message : 'Search failed');
+      })
+      .finally(() => {
+        if (id === searchId.current) setBusy(false);
+      });
+  };
 
-    let cancelled = false;
-    const handle = window.setTimeout(() => {
-      setBusy(true);
-      setError(null);
-      void searchPlaces(trimmed, near ?? gpsCoordinate)
-        .then((results) => {
-          if (cancelled) return;
-          setHits(results);
-          setError(results.length === 0 ? 'No places found' : null);
-        })
-        .catch((e) => {
-          if (cancelled) return;
-          setHits([]);
-          setError(e instanceof Error ? e.message : 'Search failed');
-        })
-        .finally(() => {
-          if (!cancelled) setBusy(false);
-        });
-    }, 320);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(handle);
-    };
-  }, [open, query, near, gpsCoordinate]);
-
-  if (!open) return null;
+  const close = () => {
+    searchId.current += 1;
+    onClose();
+  };
 
   const kind: StopKind = mode === 'destination' ? 'destination' : 'manual';
   const title = mode === 'destination' ? 'Where to?' : 'Add custom stop';
@@ -104,7 +105,7 @@ export function StopPickerSheet({
     );
   };
 
-  const showEmptyHint = query.trim().length < 2 && !busy && !error;
+  const showEmptyHint = hits.length === 0 && !busy && !error;
 
   return (
     <div className="tc-sheet-root" role="presentation">
@@ -112,7 +113,7 @@ export function StopPickerSheet({
         type="button"
         className="tc-sheet-backdrop"
         aria-label="Close"
-        onClick={onClose}
+        onClick={close}
       />
       <div
         className="tc-sheet tc-sheet-tall"
@@ -128,25 +129,30 @@ export function StopPickerSheet({
           <p className="tc-sheet-hint">{hint}</p>
         </header>
 
-        <label className="tc-plan-search">
-          <span className="tc-visually-hidden">Search places</span>
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              if (e.target.value.trim().length < 2) {
-                setHits([]);
-                setError(null);
-                setBusy(false);
-              }
-            }}
-            placeholder="Search places…"
-            autoComplete="off"
-            enterKeyHint="search"
-            autoFocus
-          />
-        </label>
+        <form
+          className="tc-plan-search-form"
+          role="search"
+          onSubmit={(e) => {
+            e.preventDefault();
+            runSearch();
+          }}
+        >
+          <label className="tc-plan-search">
+            <span className="tc-visually-hidden">Search places</span>
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search places…"
+              autoComplete="off"
+              enterKeyHint="search"
+              autoFocus
+            />
+          </label>
+          <button type="submit" className="tc-btn" disabled={busy}>
+            Search
+          </button>
+        </form>
 
         <div className="tc-plan-quick-actions">
           <button
@@ -173,7 +179,7 @@ export function StopPickerSheet({
             <p className="tc-plan-hit-empty">{error}</p>
           ) : showEmptyHint ? (
             <p className="tc-plan-hit-empty">
-              Type at least 2 letters to search
+              Type a place, then tap Search
             </p>
           ) : (
             hits.map((hit) => (
@@ -200,7 +206,7 @@ export function StopPickerSheet({
           <button
             type="button"
             className="tc-btn tc-btn-secondary"
-            onClick={onClose}
+            onClick={close}
           >
             Cancel
           </button>

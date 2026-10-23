@@ -128,7 +128,10 @@ export default function App() {
 
   useEffect(() => {
     if (!fix) return;
-    navigationService.updatePosition([fix.longitude, fix.latitude]);
+    navigationService.updatePosition(
+      [fix.longitude, fix.latitude],
+      fix.accuracyMeters,
+    );
   }, [fix]);
 
   useEffect(() => {

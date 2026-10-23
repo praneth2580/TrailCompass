@@ -8,17 +8,30 @@ export function selectNextInstruction(
   instructions: TurnInstruction[],
   distanceAlongRouteMeters: number,
 ): TurnInstruction | undefined {
+  const next = selectNextInstructionIndex(instructions, distanceAlongRouteMeters);
+  return next ? instructions[next.index] : undefined;
+}
+
+/**
+ * Index of the upcoming instruction and where its maneuver sits along the
+ * route. Each instruction's distance is the travel leading up to it, so the
+ * running total is the maneuver position.
+ */
+export function selectNextInstructionIndex(
+  instructions: TurnInstruction[],
+  distanceAlongRouteMeters: number,
+): { index: number; endAlongMeters: number } | undefined {
   if (instructions.length === 0) return undefined;
 
   let cumulative = 0;
-  for (const instruction of instructions) {
-    cumulative += instruction.distanceMeters;
+  for (let index = 0; index < instructions.length; index++) {
+    cumulative += instructions[index]!.distanceMeters;
     if (distanceAlongRouteMeters < cumulative) {
-      return instruction;
+      return { index, endAlongMeters: cumulative };
     }
   }
 
-  return instructions[instructions.length - 1];
+  return { index: instructions.length - 1, endAlongMeters: cumulative };
 }
 
 export function formatInstructionBanner(

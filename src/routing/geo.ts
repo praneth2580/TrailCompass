@@ -41,37 +41,96 @@ export function polylineLengthMeters(coords: Coordinate[]): number {
   return total;
 }
 
+export interface PolylineProjection {
+  /** Index of the vertex that starts the matched segment. */
+  segmentIndex: number;
+  /** Position within that segment, 0 (start vertex) to 1 (end vertex). */
+  t: number;
+  /** Closest point on the polyline. */
+  point: Coordinate;
+  distanceToRouteMeters: number;
+  /** Distance from the polyline start to `point`. */
+  alongMeters: number;
+}
+
 /**
- * Distance along a polyline from the start up to the nearest vertex
- * to `position`, plus remaining path length after that vertex.
+ * Closest point on the polyline to `position`, measured against each
+ * segment (not only its vertices). Sparse rural ways can have vertices
+ * hundreds of meters apart, so vertex-only matching overstates the gap.
+ */
+export function projectOntoPolyline(
+  position: Coordinate,
+  route: Coordinate[],
+): PolylineProjection | null {
+  if (route.length === 0) return null;
+  if (route.length === 1) {
+    return {
+      segmentIndex: 0,
+      t: 0,
+      point: route[0]!,
+      distanceToRouteMeters: haversineMeters(position, route[0]!),
+      alongMeters: 0,
+    };
+  }
+
+  // Local equirectangular plane centered on the rider: accurate to well
+  // under a meter at segment scale, and cheap enough to run per GPS fix.
+  const metersPerDegLat = (Math.PI / 180) * EARTH_RADIUS_M;
+  const metersPerDegLon = metersPerDegLat * Math.cos(toRad(position[1]));
+  const toPlane = (c: Coordinate): [number, number] => [
+    (c[0] - position[0]) * metersPerDegLon,
+    (c[1] - position[1]) * metersPerDegLat,
+  ];
+
+  let best: PolylineProjection | null = null;
+  let walked = 0;
+  for (let i = 0; i < route.length - 1; i++) {
+    const a = route[i]!;
+    const b = route[i + 1]!;
+    const [ax, ay] = toPlane(a);
+    const [bx, by] = toPlane(b);
+    const dx = bx - ax;
+    const dy = by - ay;
+    const lengthSq = dx * dx + dy * dy;
+    const t =
+      lengthSq > 0
+        ? Math.min(1, Math.max(0, -(ax * dx + ay * dy) / lengthSq))
+        : 0;
+    const point: Coordinate = [
+      a[0] + (b[0] - a[0]) * t,
+      a[1] + (b[1] - a[1]) * t,
+    ];
+    const distance = haversineMeters(position, point);
+    if (!best || distance < best.distanceToRouteMeters) {
+      best = {
+        segmentIndex: i,
+        t,
+        point,
+        distanceToRouteMeters: distance,
+        alongMeters: walked + haversineMeters(a, point),
+      };
+    }
+    walked += haversineMeters(a, b);
+  }
+  return best;
+}
+
+/**
+ * Distance along a polyline from the start up to the closest point to
+ * `position`. `nearestIndex` is the vertex that starts the matched segment.
  */
 export function distanceAlongPolylineMeters(
   position: Coordinate,
   route: Coordinate[],
 ): { alongMeters: number; nearestIndex: number; distanceToRouteMeters: number } {
-  if (route.length === 0) {
+  const projection = projectOntoPolyline(position, route);
+  if (!projection) {
     return { alongMeters: 0, nearestIndex: -1, distanceToRouteMeters: Infinity };
   }
-
-  let nearestIndex = 0;
-  let best = Infinity;
-  for (let i = 0; i < route.length; i++) {
-    const d = haversineMeters(position, route[i]!);
-    if (d < best) {
-      best = d;
-      nearestIndex = i;
-    }
-  }
-
-  let along = 0;
-  for (let i = 1; i <= nearestIndex; i++) {
-    along += haversineMeters(route[i - 1]!, route[i]!);
-  }
-
   return {
-    alongMeters: along,
-    nearestIndex,
-    distanceToRouteMeters: best,
+    alongMeters: projection.alongMeters,
+    nearestIndex: projection.segmentIndex,
+    distanceToRouteMeters: projection.distanceToRouteMeters,
   };
 }
 
@@ -84,6 +143,19 @@ export function remainingPolylineMeters(
     total += haversineMeters(route[i - 1]!, route[i]!);
   }
   return total;
+}
+
+/** Path length from a projected point to the end of the polyline. */
+export function remainingFromProjectionMeters(
+  route: Coordinate[],
+  projection: Pick<PolylineProjection, 'segmentIndex' | 'point'>,
+): number {
+  const next = route[projection.segmentIndex + 1];
+  if (!next) return 0;
+  return (
+    haversineMeters(projection.point, next) +
+    remainingPolylineMeters(route, projection.segmentIndex + 1)
+  );
 }
 
 export function keyForCoordinate(c: Coordinate, precision = 6): string {

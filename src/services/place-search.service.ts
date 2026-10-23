@@ -3,6 +3,19 @@ import { haversineMeters } from '../routing/geo';
 import type { PlaceHit } from '../types/trip-stop';
 
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
+/** Nominatim's usage policy allows at most one request per second. */
+const NOMINATIM_MIN_INTERVAL_MS = 1_000;
+
+let nextRequestAt = 0;
+
+async function waitForNominatimSlot(): Promise<void> {
+  const now = Date.now();
+  const waitMs = Math.max(0, nextRequestAt - now);
+  nextRequestAt = Math.max(now, nextRequestAt) + NOMINATIM_MIN_INTERVAL_MS;
+  if (waitMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
+}
 
 interface NominatimResult {
   place_id: number;
@@ -37,6 +50,7 @@ export async function searchPlaces(
     params.set('bounded', '0');
   }
 
+  await waitForNominatimSlot();
   const response = await fetch(`${NOMINATIM_URL}?${params}`, {
     headers: {
       Accept: 'application/json',

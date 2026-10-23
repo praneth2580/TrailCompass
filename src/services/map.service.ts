@@ -120,8 +120,9 @@ export class MapLibreAdapter implements MapAdapter {
 
     map.on('load', () => {
       if (this.map !== map) return;
-      this.ensureRouteLayer(map);
       this.styleLoaded = true;
+      this.ensureRouteLayer(map);
+      // Listeners redraw anything that was skipped while the style loaded.
       this.setStatus({ ok: true, message: ONLINE_MAP_STYLE_NOTE });
     });
 
@@ -395,7 +396,7 @@ export class MapLibreAdapter implements MapAdapter {
 
   drawRoute(coordinates: Coordinate[], routeIndex = 0): void {
     if (!this.map) return;
-    this.ensureRouteLayer(this.map);
+    if (!this.ensureRouteLayer(this.map)) return;
     const source = this.map.getSource(ROUTE_SOURCE);
     if (!(source instanceof GeoJSONSource)) return;
     source.setData({
@@ -412,7 +413,7 @@ export class MapLibreAdapter implements MapAdapter {
   /** Keep the previous path visible (dashed) while a new one is calculated. */
   drawGhostRoute(coordinates: Coordinate[]): void {
     if (!this.map || coordinates.length < 2) return;
-    this.ensureRouteLayer(this.map);
+    if (!this.ensureRouteLayer(this.map)) return;
     const source = this.map.getSource(GHOST_SOURCE);
     if (!(source instanceof GeoJSONSource)) return;
     source.setData({
@@ -435,7 +436,7 @@ export class MapLibreAdapter implements MapAdapter {
    */
   drawRecalcLink(from: Coordinate, to: Coordinate): void {
     if (!this.map) return;
-    this.ensureRouteLayer(this.map);
+    if (!this.ensureRouteLayer(this.map)) return;
     const source = this.map.getSource(RECALC_SOURCE);
     if (!(source instanceof GeoJSONSource)) return;
     source.setData({
@@ -475,7 +476,7 @@ export class MapLibreAdapter implements MapAdapter {
     showAll = false,
   ): void {
     if (!this.map) return;
-    this.ensureRouteLayer(this.map);
+    if (!this.ensureRouteLayer(this.map)) return;
     const source = this.map.getSource(ALT_SOURCE);
     if (!(source instanceof GeoJSONSource)) return;
 
@@ -580,7 +581,14 @@ export class MapLibreAdapter implements MapAdapter {
     this.map = null;
   }
 
-  private ensureRouteLayer(map: MapLibreMap): void {
+  /**
+   * Add the route sources and layers. Returns false until the style has
+   * loaded: MapLibre throws "Style is not done loading" on addSource before
+   * then. Whatever was skipped is redrawn when the status turns ok.
+   */
+  private ensureRouteLayer(map: MapLibreMap): boolean {
+    if (!this.styleLoaded) return false;
+
     if (!map.getSource(GHOST_SOURCE)) {
       map.addSource(GHOST_SOURCE, {
         type: 'geojson',
@@ -661,6 +669,7 @@ export class MapLibreAdapter implements MapAdapter {
         },
       });
     }
+    return true;
   }
 
   private setStatus(status: MapDataStatus): void {

@@ -1,11 +1,7 @@
 import type { Coordinate } from '../routing/routing-adapter';
 import { haversineMeters, distanceAlongPolylineMeters } from '../routing/geo';
 import type { PlaceHit, PoiKind } from '../types/trip-stop';
-
-const OVERPASS_ENDPOINTS = [
-  'https://overpass-api.de/api/interpreter',
-  'https://overpass.kumi.systems/api/interpreter',
-];
+import { fetchOverpass } from '../routing/overpass-client';
 
 interface OverpassNode {
   type: string;
@@ -52,7 +48,7 @@ out center tags;`;
     throw new Error('Need a location or a planned route to find stops');
   }
 
-  const data = await overpass(query);
+  const data = (await fetchOverpass<OverpassNode>(query)).elements ?? [];
   const seen = new Set<string>();
   const hits: PlaceHit[] = [];
 
@@ -121,26 +117,4 @@ function sampleRoute(route: Coordinate[], count: number): Coordinate[] {
     out.push(route[idx]!);
   }
   return out;
-}
-
-async function overpass(query: string): Promise<OverpassNode[]> {
-  let lastError: Error | null = null;
-  for (const endpoint of OVERPASS_ENDPOINTS) {
-    try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `data=${encodeURIComponent(query)}`,
-      });
-      if (!response.ok) {
-        lastError = new Error(`Overpass ${response.status}`);
-        continue;
-      }
-      const json = (await response.json()) as { elements?: OverpassNode[] };
-      return json.elements ?? [];
-    } catch (e) {
-      lastError = e instanceof Error ? e : new Error('Overpass failed');
-    }
-  }
-  throw lastError ?? new Error('POI search unavailable');
 }

@@ -96,6 +96,44 @@ export function edgeCostMeters(
   }
 }
 
+/** Every highway class the cost tables distinguish, plus one unknown class. */
+const COSTED_HIGHWAY_CLASSES = [
+  'motorway',
+  'motorway_link',
+  'trunk',
+  'trunk_link',
+  'primary',
+  'primary_link',
+  'secondary',
+  'secondary_link',
+  'tertiary',
+  'tertiary_link',
+  'unclassified',
+  'residential',
+  'living_street',
+  'service',
+  'road',
+];
+
+const minCostCache = new Map<RoutingProfileId, number>();
+
+/**
+ * Cheapest cost any edge can have per meter under `profile`. Scaling the
+ * straight-line A* heuristic by this keeps it from overestimating, so the
+ * search still returns the cheapest path.
+ */
+export function minCostPerMeter(profile: RoutingProfileId): number {
+  const cached = minCostCache.get(profile);
+  if (cached != null) return cached;
+  const min = Math.min(
+    ...COSTED_HIGHWAY_CLASSES.map((highway) =>
+      edgeCostMeters(1, highway, profile),
+    ),
+  );
+  minCostCache.set(profile, min);
+  return min;
+}
+
 function quietClassPenalty(highway: string): number {
   switch (highway) {
     case 'motorway':
