@@ -27,6 +27,22 @@ export type BBox = [west: number, south: number, east: number, north: number];
  */
 export type RoadPackKind = 'corridor' | 'backbone' | 'connector';
 
+/** The kinds as riders see them, in display order. */
+export const ROAD_PACK_KINDS: Array<{ kind: RoadPackKind; title: string; hint: string }> = [
+  { kind: 'backbone', title: 'Major roads', hint: 'Highways for long trips, in areas about 55 km across' },
+  { kind: 'corridor', title: 'Route corridors', hint: 'Every road along a route you planned' },
+  { kind: 'connector', title: 'Local streets', hint: 'Streets around where trips start and end' },
+];
+
+/** Packs saved before kinds existed are route corridors. */
+export function packKind(pack: RoadPackMeta): RoadPackKind {
+  return pack.kind ?? 'corridor';
+}
+
+export function totalPackBytes(packs: RoadPackMeta[]): number {
+  return packs.reduce((sum, pack) => sum + pack.bytes, 0);
+}
+
 export interface RoadPackMeta {
   id: string;
   label: string;
@@ -41,6 +57,8 @@ export interface RoadPackMeta {
   /** Format version; packs without tags / junction controls have none. */
   schema?: number;
   kind?: RoadPackKind;
+  /** The main roads in it by name, for the Offline tab; absent on older packs. */
+  roads?: string[];
 }
 
 /**
@@ -133,6 +151,7 @@ export class RoadPackService {
       coverage: collection.region?.coverage,
       schema: PACK_SCHEMA,
       kind,
+      roads: mainRoadNames(collection),
     };
 
     await storageManager.writeTextFile(`${PACK_DIR}/${id}.json`, json);
@@ -178,6 +197,23 @@ export class RoadPackService {
 
 function isCurrent(meta: RoadPackMeta): boolean {
   return (meta.schema ?? 1) >= PACK_SCHEMA;
+}
+
+const MAJOR_HIGHWAYS = new Set(['motorway', 'trunk', 'primary', 'secondary']);
+
+/** The two names on the most ways, bigger roads counting more. */
+export function mainRoadNames(collection: NetworkFeatureCollection): string[] {
+  const tally = new Map<string, number>();
+  for (const feature of collection.features) {
+    const name = feature.properties?.name?.trim();
+    if (!name) continue;
+    const highway = feature.properties?.highway?.replace(/_link$/, '') ?? '';
+    tally.set(name, (tally.get(name) ?? 0) + (MAJOR_HIGHWAYS.has(highway) ? 4 : 1));
+  }
+  return [...tally]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 2)
+    .map(([name]) => name);
 }
 
 function labelForBbox(bbox: BBox, featureCount: number): string {

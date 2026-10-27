@@ -1,5 +1,6 @@
 import { App } from '@capacitor/app';
 import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
+import { downloadPolicy } from './download-policy.service';
 
 /**
  * In-app updates from GitHub Releases (the app is not on Google Play).
@@ -153,6 +154,16 @@ export async function installAppUpdate(): Promise<void> {
   let path = status.state === 'installing' || status.state === 'needs-permission'
     ? status.path
     : null;
+  if (!path && !downloadPolicy.canDownload()) {
+    setStatus({
+      state: 'error',
+      message: 'Downloads are set to Wi-Fi only. Connect to Wi-Fi, or allow mobile data in the Offline tab.',
+      current,
+      release,
+    });
+    return;
+  }
+
   let progress: PluginListenerHandle | null = null;
   try {
     if (!path) {

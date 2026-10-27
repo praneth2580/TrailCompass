@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+// The network type comes from the Android app; tests set it directly.
+vi.mock('../services/downloads-plugin', () => ({ Downloads: {} }));
+
 const MAIN = 'https://overpass-api.de/api/interpreter';
 
 function jsonResponse(body: unknown): Response {
@@ -56,6 +59,27 @@ describe('isRuntimeErrorRemark', () => {
 });
 
 describe('fetchOverpass', () => {
+  it('holds road data on mobile data with Wi-Fi only until Wi-Fi connects', async () => {
+    const { fetchOverpass } = await load();
+    const { downloadPolicy } = await import('../services/download-policy.service');
+    downloadPolicy.setSetting('wifi');
+    downloadPolicy.setNetwork('cellular');
+    const fetchMock = vi.fn(async () => jsonResponse({ elements: [{ id: 1 }] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const roads = fetchOverpass<{ id: number }>('[out:json][timeout:25];', { roadData: true });
+    // Searches are small and go ahead on mobile data.
+    const search = fetchOverpass<{ id: number }>('[out:json][timeout:25];');
+    await vi.advanceTimersByTimeAsync(60_000);
+    await expect(search).resolves.toEqual({ elements: [{ id: 1 }] });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    downloadPolicy.setNetwork('wifi');
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(roads).resolves.toEqual({ elements: [{ id: 1 }] });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('retries the next mirror when a 200 reply carries a runtime error', async () => {
     const { fetchOverpass } = await load();
     const fetchMock = vi

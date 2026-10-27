@@ -157,7 +157,7 @@ async function loadTile(
       ],
       180,
     ),
-    { signal, onRetry },
+    { signal, onRetry, roadData: true },
   );
   const collection = overpassToNetwork(
     raw,

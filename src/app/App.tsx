@@ -28,6 +28,8 @@ import { routeLibrary } from '../services/route-library.service';
 import { voiceGuidance } from '../services/voice-guidance.service';
 import { checkForPoiUpdate } from '../services/poi-data.service';
 import { checkForAppUpdate } from '../services/app-update.service';
+import { backgroundPlanning } from '../services/background-planning.service';
+import { downloadPolicy } from '../services/download-policy.service';
 import { AppUpdateSheet } from '../components/AppUpdateSheet';
 import {
   tripPlanner,
@@ -39,7 +41,7 @@ import {
 } from '../routing/offline-adapter';
 import type { CalculatedRoute, Coordinate } from '../routing/routing-adapter';
 import type { CompassReading, GpsFix, NavigationState } from '../types/navigation';
-import type { SavedRoute } from '../types/route';
+import type { SavedPlaces, SavedRoute } from '../types/route';
 import type { StopKind } from '../types/trip-stop';
 import {
   setBrowserFullscreen,
@@ -55,6 +57,34 @@ const BACK_EXIT_WINDOW_MS = 2_500;
 const POI_UPDATE_DELAY_MS = 10_000;
 /** And for a newer app release, a little later still. */
 const APP_UPDATE_DELAY_MS = 15_000;
+/** Zen fade lengths; they match the zen animations in index.css. */
+const ZEN_ENTER_MS = 180;
+const ZEN_LEAVE_MS = 260;
+
+/** Zen mode passes through a short fade on the way in and out. */
+type ZenPhase = 'off' | 'entering' | 'on' | 'leaving';
+
+const prefersReducedMotion = () =>
+  window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+
+/**
+ * Map padding that frames the route clear of the zen compass: above it,
+ * or beside it when that leaves more room (a phone in landscape).
+ * offsetTop/Left give its resting place, unaffected by the rise animation.
+ */
+function zenRoutePadding(layer: HTMLElement | null) {
+  const compass = layer?.querySelector<HTMLElement>('.tc-compass-zen');
+  if (!layer || !compass) return { top: 80, right: 32, bottom: 260, left: 32 };
+  const width = layer.clientWidth;
+  const height = layer.clientHeight;
+  const above = height - compass.offsetTop + 24;
+  const beside = compass.offsetLeft + compass.offsetWidth + 24;
+  const roomAbove = (width - 64) * (height - 80 - above);
+  const roomBeside = (width - 32 - beside) * (height - 112);
+  return roomBeside > roomAbove
+    ? { top: 80, right: 32, bottom: 32, left: beside }
+    : { top: 80, right: 32, bottom: above, left: 32 };
+}
 
 export default function App() {
   const [screen, setScreen] = useState<AppScreen>('map');
@@ -67,6 +97,11 @@ export default function App() {
   );
   const [now, setNow] = useState(() => Date.now());
   const [followGps, setFollowGps] = useState(true);
+  /** Zen mode: only the map (with its route) and a large compass. */
+  const [zenPhase, setZenPhase] = useState<ZenPhase>('off');
+  /** Route planning is showing its progress in a notification. */
+  const [inBackground, setInBackground] = useState(false);
+  const zenMode = zenPhase === 'entering' || zenPhase === 'on';
   const [libraryTick, setLibraryTick] = useState(0);
   const [toast, setToast] = useState<{
     message: string;
@@ -88,6 +123,8 @@ export default function App() {
   const screenRef = useRef<AppScreen>(screen);
   const handleBackRef = useRef<() => void>(() => {});
   const lastBackAt = useRef(0);
+  const zenTimer = useRef<number | undefined>(undefined);
+  const zenLayerRef = useRef<HTMLDivElement>(null);
 
   const { rideMode, dismissRideMode } = useRideFullscreen({
     status: nav.status,
@@ -148,6 +185,10 @@ export default function App() {
     void locationService.startWatching();
     void compassService.start();
     void navigationService.ensureEngine();
+    void downloadPolicy.start();
+    const offBackground = backgroundPlanning.subscribe(() =>
+      setInBackground(backgroundPlanning.isActive()),
+    );
 
     const tick = window.setInterval(() => setNow(Date.now()), 2000);
     // At most once a day; downloads quietly in the background.
@@ -174,6 +215,7 @@ export default function App() {
       unsubEngine();
       unsubTrip();
       unsubMap();
+      offBackground();
       window.clearInterval(tick);
       window.clearTimeout(poiUpdate);
       window.clearTimeout(appUpdate);
@@ -281,6 +323,8 @@ export default function App() {
   };
 
   const handleMapClick = (coordinate: Coordinate) => {
+    // Zen mode is for looking around: taps never change the trip.
+    if (zenMode) return;
     if (rideMode) {
       dismissRideMode();
       return;
@@ -490,6 +534,20 @@ export default function App() {
     mapService.centerOn([fix.longitude, fix.latitude]);
   };
 
+  const canRunInBackground =
+    backgroundPlanning.isAvailable() &&
+    !inBackground &&
+    navigationService.isPlanningRoute();
+
+  /** Notification with progress, Pause and Stop; the app goes to the background. */
+  const handleRunInBackground = () => {
+    void backgroundPlanning.start().then((started) => {
+      if (!started && navigationService.isPlanningRoute()) {
+        setToast({ message: "Couldn't continue in the background", tone: 'error' });
+      }
+    });
+  };
+
   const handleStop = () => {
     dismissRideMode();
     void setBrowserFullscreen(false);
@@ -501,12 +559,30 @@ export default function App() {
     setVoiceOn(enabled);
   };
 
+  /** Shows `phase` now, then `settled` once its fade has played. */
+  const stepZen = (phase: ZenPhase, settled: ZenPhase, ms: number) => {
+    window.clearTimeout(zenTimer.current);
+    setZenPhase(phase);
+    zenTimer.current = window.setTimeout(
+      () => setZenPhase(settled),
+      prefersReducedMotion() ? 0 : ms,
+    );
+  };
+
+  useEffect(() => () => window.clearTimeout(zenTimer.current), []);
+
+  const closeZenMode = () => stepZen('leaving', 'off', ZEN_LEAVE_MS);
+
   /**
    * Android back: close the open sheet, then leave map-pick or ride view,
    * then return to the Map tab. Mid-navigation, leaving needs a second press.
    */
   const handleBack = () => {
     if (handleOverlayBack()) return;
+    if (zenMode) {
+      closeZenMode();
+      return;
+    }
     if (tripPlanner.getState().mapPick) {
       tripPlanner.cancelMapPick();
       setScreen('plan');
@@ -540,6 +616,21 @@ export default function App() {
     handleBackRef.current = handleBack;
   });
 
+  const openZenMode = () => {
+    stepZen('entering', 'on', ZEN_ENTER_MS);
+    const route = navigationService.getActiveCalculatedRoute();
+    // While navigating, the camera keeps following the rider.
+    if (!route || navMode) return;
+    setFollowGps(false);
+    // Two frames: let the map grow into the space the hidden bars leave,
+    // then frame the route clear of the compass.
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() =>
+        mapService.fitRoute(route.coordinates, zenRoutePadding(zenLayerRef.current)),
+      ),
+    );
+  };
+
   const openSaveShareSheet = (mode: SaveShareMode) => {
     if (!navigationService.getActiveCalculatedRoute()) {
       setToast({ message: 'No route to save yet', tone: 'error' });
@@ -550,6 +641,29 @@ export default function App() {
     setSheetMode(mode);
   };
 
+  /** The trip's names, when the route being saved was planned for it. */
+  const tripPlaces = (): SavedPlaces | undefined => {
+    const { destination, stops } = tripPlanner.getState();
+    if (
+      !destination ||
+      !navigationService.isPlannedFor(
+        destination.coordinate,
+        stops.map((stop) => stop.coordinate),
+      )
+    ) {
+      return undefined;
+    }
+    return {
+      end: destination.name,
+      ...(destination.notes ? { endNotes: destination.notes } : {}),
+      stops: stops.map((stop) => ({
+        name: stop.name,
+        kind: stop.kind === 'destination' ? 'manual' : stop.kind,
+        ...(stop.notes ? { notes: stop.notes } : {}),
+      })),
+    };
+  };
+
   const handleSheetConfirm = async (name: string) => {
     if (!sheetMode) return;
     setSheetBusy(true);
@@ -557,14 +671,14 @@ export default function App() {
     try {
       if (sheetMode === 'save') {
         setToast({ message: 'Saving route…', tone: 'loading' });
-        const saved = await navigationService.saveActiveRoute(name);
+        const saved = await navigationService.saveActiveRoute(name, tripPlaces());
         setLibraryTick((n) => n + 1);
         setSheetMode(null);
         setScreen('library');
         setToast({ message: `Saved “${saved.name}”`, tone: 'success' });
       } else {
         setToast({ message: 'Preparing share file…', tone: 'loading' });
-        const snapshot = navigationService.buildSavedSnapshot(name);
+        const snapshot = navigationService.buildSavedSnapshot(name, tripPlaces());
         if (!snapshot) throw new Error('No route to share');
         const shared = await routeLibrary.exportAndShare(
           snapshot,
@@ -592,7 +706,7 @@ export default function App() {
   };
 
   const handleOpenSavedRoute = (route: SavedRoute) => {
-    tripPlanner.loadFromSaved(route.end, route.waypoints ?? []);
+    tripPlanner.loadFromSaved(route.end, route.waypoints ?? [], route.places);
     navigationService.loadSavedRoute(route);
     setFollowGps(true);
     setScreen('map');
@@ -613,6 +727,7 @@ export default function App() {
       data-nav={navMode ? 'true' : undefined}
       data-ride={rideMode ? 'true' : undefined}
       data-map-pick={mapPickActive ? 'true' : undefined}
+      data-zen={zenPhase === 'off' ? undefined : zenPhase}
     >
       {/* Always mounted so switching tabs does not reload the map. */}
       <main
@@ -628,7 +743,7 @@ export default function App() {
           onMapClick={handleMapClick}
           onFollowBreak={() => setFollowGps(false)}
           onRoutePick={(index) => {
-            if (navMode) return;
+            if (navMode || zenMode) return;
             navigationService.selectAlternative(index);
           }}
         />
@@ -736,8 +851,35 @@ export default function App() {
           <CompassWidget
             reading={compass}
             onEnable={() => void compassService.start()}
+            onOpen={mapPickActive ? undefined : openZenMode}
           />
         </aside>
+
+        {zenPhase !== 'off' ? (
+          <div className="tc-zen" ref={zenLayerRef} inert={zenPhase === 'leaving'}>
+            <button
+              type="button"
+              className="tc-zen-exit"
+              onClick={closeZenMode}
+              aria-label="Exit zen mode"
+            >
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden>
+                <path
+                  d="M6 6l12 12M18 6 6 18"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                />
+              </svg>
+              Exit
+            </button>
+            <CompassWidget
+              reading={compass}
+              onEnable={() => void compassService.start()}
+              variant="zen"
+            />
+          </div>
+        ) : null}
 
         {!mapPickActive ? (
           <div className="tc-map-dock">
@@ -769,6 +911,7 @@ export default function App() {
               canSaveRoute={canSaveRoute}
               routeOutdated={routeOutdated}
               onPlan={handlePlanRoute}
+              onRunInBackground={canRunInBackground ? handleRunInBackground : undefined}
               onStart={() => handleStartNavigation()}
               onStop={handleStop}
               onExitRide={dismissRideMode}
@@ -809,6 +952,20 @@ export default function App() {
             planning={planBusy || nav.status === 'planning'}
             routeOutdated={routeOutdated}
             onPreview={handlePreviewFromPlan}
+            onShowMap={() => {
+              setScreen('map');
+              // Mid-ride the camera follows the rider; while planning there
+              // is no new route yet to frame.
+              if (navMode) {
+                setFollowGps(true);
+                return;
+              }
+              const route = navigationService.getActiveCalculatedRoute();
+              if (!route || nav.status === 'planning') return;
+              setFollowGps(false);
+              mapService.fitRoute(route.coordinates);
+            }}
+            onRunInBackground={canRunInBackground ? handleRunInBackground : undefined}
             onPlanInPlace={() => planTripFromItinerary({ showMap: false })}
             onStart={() => {
               handleStartNavigation();
@@ -826,6 +983,7 @@ export default function App() {
           <LibraryScreen
             refreshKey={libraryTick}
             onOpenRoute={handleOpenSavedRoute}
+            onPlanTrip={() => setScreen('plan')}
           />
           {toast ? (
             <StatusToast message={toast.message} tone={toast.tone} />
@@ -835,8 +993,8 @@ export default function App() {
         <OfflineScreen engine={engine} />
       ) : null}
 
-      {/* Never interrupt turn-by-turn; it appears once the ride ends. */}
-      {!navMode ? <AppUpdateSheet /> : null}
+      {/* Never interrupt turn-by-turn or zen mode; it appears afterwards. */}
+      {!navMode && !zenMode ? <AppUpdateSheet /> : null}
 
       <nav className="tc-bottom-nav" aria-label="Main">
         {APP_ROUTES.map((route) => (

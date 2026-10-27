@@ -162,7 +162,7 @@ export async function loadLocalArea(
       `way["highway"~"${DETAIL_HIGHWAY_REGEX}"]["area"!~"yes"](${bboxClause(inner)});`,
       `way["highway"~"${CONNECTOR_HIGHWAY_REGEX}"]["area"!~"yes"](${bboxClause(outer)});`,
     ]),
-    { onProgress, signal },
+    { onProgress, signal, roadData: true },
   );
   const collection = overpassToNetwork(raw, outer, { kind: 'bbox' }, 'OSM local streets');
   remember(cacheKey, collection);
@@ -232,6 +232,7 @@ async function loadNetwork(request: {
   const raw = await fetchOverpass<OverpassElement>(request.query, {
     onProgress,
     signal,
+    roadData: true,
   });
   onProgress?.({
     phase: 'building-graph',

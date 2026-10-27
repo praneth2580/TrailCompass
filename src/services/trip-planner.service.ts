@@ -5,6 +5,7 @@ import {
   type StopKind,
   type TripStop,
 } from '../types/trip-stop';
+import type { SavedPlaces } from '../types/route';
 
 export interface TripPlannerState {
   destination: TripStop | null;
@@ -178,13 +179,16 @@ export class TripPlannerService {
     return this.state.destination != null;
   }
 
-  /** Load intermediate waypoints from a saved route (bare coordinates). */
-  loadFromSaved(end: Coordinate, waypoints: Coordinate[] = []): void {
+  /** A saved trip's destination and stops, with their names when it kept them. */
+  loadFromSaved(end: Coordinate, waypoints: Coordinate[] = [], places?: SavedPlaces): void {
+    const named = places?.stops?.length === waypoints.length ? places.stops : undefined;
     const stops = waypoints.map((c, i) =>
-      createTripStop('manual', c, `Stop ${i + 1}`),
+      named
+        ? createTripStop(named[i]!.kind, c, named[i]!.name, named[i]!.notes)
+        : createTripStop('manual', c, `Stop ${i + 1}`),
     );
     this.setState({
-      destination: createTripStop('destination', end, 'Destination'),
+      destination: createTripStop('destination', end, places?.end ?? 'Destination', places?.endNotes),
       stops,
       mapPick: null,
     });

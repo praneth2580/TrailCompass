@@ -10,6 +10,7 @@ import {
 } from '../routing/route-file';
 import {
   calculatedToSavedRoute,
+  type SavedPlaces,
   type SavedRoute,
 } from '../types/route';
 import { routeRepository } from '../database/route-repository';
@@ -34,6 +35,7 @@ export class RouteLibraryService {
       start?: Coordinate;
       end?: Coordinate;
       waypoints?: Coordinate[];
+      places?: SavedPlaces;
     },
   ): Promise<SavedRoute> {
     const saved = calculatedToSavedRoute(route, name.trim() || 'Saved route', extras);
@@ -51,6 +53,11 @@ export class RouteLibraryService {
 
   delete(id: string): Promise<void> {
     return routeRepository.deleteRoute(id);
+  }
+
+  /** Undo a delete: the route returns with its original dates. */
+  restore(route: SavedRoute): Promise<void> {
+    return routeRepository.restoreRoute(route);
   }
 
   /** Resolves false when the rider dismisses the share sheet. */

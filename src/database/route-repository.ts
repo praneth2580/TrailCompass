@@ -32,6 +32,16 @@ export class RouteRepository {
     return next;
   }
 
+  /** Put a deleted route back exactly as it was, dates included (Undo). */
+  async restoreRoute(route: SavedRoute): Promise<void> {
+    await appDatabase.setJson(`route:${route.id}`, route);
+    const ids = (await appDatabase.getJson<string[]>(INDEX_KEY)) ?? [];
+    if (!ids.includes(route.id)) {
+      ids.push(route.id);
+      await appDatabase.setJson(INDEX_KEY, ids);
+    }
+  }
+
   async deleteRoute(id: string): Promise<void> {
     await appDatabase.remove(`route:${id}`);
     const ids = (await appDatabase.getJson<string[]>(INDEX_KEY)) ?? [];

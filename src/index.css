@@ -355,98 +355,165 @@ button {
   box-shadow: var(--tc-shadow);
 }
 
+/* The face is a 200-unit SVG, so --tc-dial scales all of it. */
 .tc-compass-dial {
+  --tc-dial-size: var(--tc-dial, 44px);
   position: relative;
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  border: 2px solid var(--tc-border-strong);
-  background:
-    radial-gradient(circle at 50% 42%, #1a2c23 0%, #08120e 72%);
+  width: var(--tc-dial-size);
+  height: var(--tc-dial-size);
   flex-shrink: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 36%, #1f3529 0%, #0c1913 55%, #050b08 100%);
+  box-shadow:
+    0 0 0 1.5px var(--tc-border-strong),
+    inset 0 calc(var(--tc-dial-size) * 0.03) calc(var(--tc-dial-size) * 0.12) rgba(0, 0, 0, 0.75);
 }
 
-.tc-compass-dial[data-unavailable] {
-  opacity: 0.5;
-}
-
-.tc-compass-tick {
+/* Glass: a soft highlight over the whole face, needle included. */
+.tc-compass-dial::after {
+  content: '';
   position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.13) 0%, rgba(255, 255, 255, 0.03) 40%, transparent 55%);
+  pointer-events: none;
+}
+
+.tc-compass-face,
+.tc-compass-needle svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.tc-compass-dial[data-unavailable] .tc-compass-face {
+  opacity: 0.45;
+}
+
+.tc-compass-dial[data-unavailable] .tc-compass-needle {
+  opacity: 0;
+}
+
+.tc-compass-ring {
+  fill: none;
+  stroke: rgba(240, 160, 32, 0.22);
+  stroke-width: 1;
+}
+
+.tc-compass-mark {
+  stroke: rgba(238, 243, 236, 0.5);
+  stroke-width: 9;
+  stroke-linecap: round;
+}
+
+.tc-compass-zen .tc-compass-mark {
+  stroke: rgba(238, 243, 236, 0.26);
+  stroke-width: 1.2;
+}
+
+.tc-compass-zen .tc-compass-mark[data-major] {
+  stroke: rgba(238, 243, 236, 0.62);
+  stroke-width: 2;
+}
+
+.tc-compass-zen .tc-compass-mark[data-cardinal] {
+  stroke: var(--tc-text);
+  stroke-width: 2.8;
+}
+
+.tc-compass-north {
+  fill: var(--tc-danger);
+}
+
+.tc-compass-letter,
+.tc-compass-numeral {
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
+.tc-compass-letter {
   font-family: var(--tc-font-display);
-  font-size: 0.5rem;
+  font-size: 40px;
   font-weight: 700;
-  color: var(--tc-muted);
-  line-height: 1;
+  fill: var(--tc-muted);
 }
 
-.tc-compass-tick-n {
-  top: 3px;
-  left: 50%;
-  transform: translateX(-50%);
-  color: var(--tc-accent);
-  font-size: 0.55rem;
+.tc-compass-letter-n {
+  fill: var(--tc-danger);
 }
 
-.tc-compass-tick-e {
-  right: 3px;
-  top: 50%;
-  transform: translateY(-50%);
+.tc-compass-zen .tc-compass-letter {
+  font-size: 22px;
+  fill: var(--tc-text);
 }
 
-.tc-compass-tick-s {
-  bottom: 3px;
-  left: 50%;
-  transform: translateX(-50%);
+.tc-compass-zen .tc-compass-letter-n {
+  fill: var(--tc-danger);
 }
 
-.tc-compass-tick-w {
-  left: 3px;
-  top: 50%;
-  transform: translateY(-50%);
+.tc-compass-numeral {
+  font-family: var(--tc-font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  fill: var(--tc-muted);
 }
 
 .tc-compass-needle {
   position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 6px;
-  height: 62%;
-  margin-left: -3px;
-  margin-top: -31%;
-  transform-origin: 50% 50%;
-  transition: transform 120ms linear;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  inset: 0;
+  transition: transform 140ms linear;
+  filter: drop-shadow(0 calc(var(--tc-dial-size) * 0.012) calc(var(--tc-dial-size) * 0.02) rgba(0, 0, 0, 0.6));
 }
 
-.tc-compass-needle-tip,
-.tc-compass-needle-tail {
-  width: 0;
-  height: 0;
-  border-left: 3px solid transparent;
-  border-right: 3px solid transparent;
+.tc-compass-needle-lit {
+  fill: #ffc24f;
 }
 
-.tc-compass-needle-tip {
-  border-bottom: 14px solid var(--tc-danger);
+.tc-compass-needle-shade {
+  fill: #d4850c;
 }
 
-.tc-compass-needle-tail {
-  border-top: 11px solid rgba(240, 244, 239, 0.85);
+.tc-compass-tail-lit {
+  fill: #e4ebe5;
+}
+
+.tc-compass-tail-shade {
+  fill: #96a89d;
 }
 
 .tc-compass-hub {
   position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 8px;
-  height: 8px;
-  margin: -4px 0 0 -4px;
+  inset: 0;
+  margin: auto;
+  width: 18%;
+  height: 18%;
   border-radius: 50%;
-  background: var(--tc-accent);
-  border: 2px solid var(--tc-panel-solid);
-  z-index: 1;
+  background: var(--tc-panel-solid);
+  border: calc(var(--tc-dial-size) * 0.045) solid var(--tc-accent);
+}
+
+.tc-compass-zen .tc-compass-hub {
+  width: 9%;
+  height: 9%;
+  border-width: calc(var(--tc-dial-size) * 0.018);
+  box-shadow: 0 0 0 calc(var(--tc-dial-size) * 0.012) rgba(0, 0, 0, 0.35);
+}
+
+/* The HUD compass is a button that opens zen mode. */
+.tc-compass-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .tc-compass-meta {
@@ -482,6 +549,250 @@ button {
   font-size: 0.72rem;
   color: var(--tc-accent);
   font-weight: 600;
+}
+
+/* ── Zen mode: just the map with its route, and a big compass ─ */
+
+/* data-zen steps: entering (chrome fades out) → on → leaving (chrome
+   fades back in). App.tsx times the steps to these animations. */
+.tc-app[data-zen='entering']
+  :is(.tc-hud, .tc-map-dock, .tc-locate-btn, .tc-recenter-btn, .tc-map-pick-banner,
+    .tc-map-badge, .tc-toast, .maplibregl-ctrl-top-right) {
+  animation: tc-fade-out 180ms ease-in forwards;
+  pointer-events: none;
+}
+
+.tc-app[data-zen='on']
+  :is(.tc-hud, .tc-map-dock, .tc-locate-btn, .tc-recenter-btn, .tc-map-pick-banner,
+    .tc-map-badge, .tc-toast, .maplibregl-ctrl-top-right),
+.tc-app[data-zen='entering'] .tc-bottom-nav,
+.tc-app[data-zen='on'] .tc-bottom-nav {
+  display: none;
+}
+
+.tc-app[data-zen='leaving']
+  :is(.tc-hud, .tc-map-dock, .tc-locate-btn, .tc-recenter-btn, .tc-map-badge,
+    .tc-bottom-nav, .maplibregl-ctrl-top-right) {
+  animation: tc-fade-in 260ms ease-out both;
+}
+
+/* Lets pinch, zoom and drag reach the map around the controls. */
+.tc-zen {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.tc-zen > * {
+  pointer-events: auto;
+}
+
+/* Shade at the edges keeps the controls readable over a bright map. */
+.tc-zen::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(to bottom, rgba(6, 16, 12, 0.45), transparent 7rem),
+    linear-gradient(to top, rgba(6, 16, 12, 0.6), transparent 45%);
+  animation: tc-fade-in 400ms ease-out both;
+}
+
+.tc-zen-exit {
+  position: absolute;
+  top: calc(0.75rem + var(--tc-safe-top));
+  right: calc(0.75rem + var(--tc-safe-right));
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: var(--tc-touch);
+  padding: 0 1.1rem 0 0.9rem;
+  border-radius: 999px;
+  border: 1px solid var(--tc-border);
+  background: var(--tc-panel);
+  backdrop-filter: blur(14px);
+  box-shadow: var(--tc-shadow);
+  color: var(--tc-text);
+  font-family: var(--tc-font-display);
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+  animation: tc-zen-drop 360ms cubic-bezier(0.2, 0.8, 0.3, 1) 120ms both;
+}
+
+.tc-zen-exit:active {
+  transform: scale(0.96);
+}
+
+/* About a quarter of the screen: the dial is roughly a quarter of its height.
+   It sits clear of the map's attribution line along the bottom edge. */
+.tc-zen .tc-compass-zen {
+  --tc-dial: clamp(9rem, 24vh, 58vw);
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(2.4rem + var(--tc-safe-bottom));
+  width: fit-content;
+  max-width: calc(100% - 1.5rem);
+  margin: 0 auto;
+  gap: 1.25rem;
+  padding: 0.65rem 1.6rem 0.65rem 0.65rem;
+  border-color: rgba(240, 160, 32, 0.22);
+  background:
+    linear-gradient(160deg, rgba(240, 160, 32, 0.08), transparent 45%),
+    var(--tc-panel);
+  box-shadow:
+    var(--tc-shadow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transform-origin: 50% 100%;
+  animation: tc-zen-rise 560ms cubic-bezier(0.2, 0.9, 0.3, 1.12) both;
+}
+
+.tc-compass-zen .tc-compass-dial {
+  box-shadow:
+    0 0 0 1.5px rgba(240, 160, 32, 0.55),
+    0 0 calc(var(--tc-dial-size) * 0.14) rgba(240, 160, 32, 0.16),
+    inset 0 calc(var(--tc-dial-size) * 0.03) calc(var(--tc-dial-size) * 0.12) rgba(0, 0, 0, 0.75);
+}
+
+/* The face spins up and the needle swings in to settle on the heading. */
+.tc-zen .tc-compass-face {
+  animation: tc-zen-face-in 700ms cubic-bezier(0.2, 0.8, 0.3, 1) 60ms both;
+}
+
+.tc-zen .tc-compass-needle svg {
+  animation: tc-zen-needle-in 1000ms cubic-bezier(0.3, 1.5, 0.45, 1) 180ms both;
+}
+
+.tc-compass-zen .tc-compass-meta {
+  gap: 0.35rem;
+  animation: tc-zen-meta-in 380ms ease-out 200ms both;
+}
+
+.tc-compass-zen .tc-compass-heading {
+  font-size: clamp(2.1rem, 6.5vh, 3.2rem);
+}
+
+.tc-compass-cardinal {
+  font-family: var(--tc-font-display);
+  font-size: clamp(1rem, 2.6vh, 1.3rem);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--tc-accent);
+  line-height: 1;
+}
+
+.tc-compass-zen .tc-compass-accuracy {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+}
+
+.tc-compass-zen .tc-compass-accuracy::before {
+  content: '';
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--tc-muted);
+  flex-shrink: 0;
+}
+
+.tc-compass-zen .tc-compass-accuracy[data-accuracy='high']::before {
+  background: var(--tc-ok);
+}
+
+.tc-compass-zen .tc-compass-accuracy[data-accuracy='medium']::before {
+  background: var(--tc-accent);
+}
+
+.tc-compass-zen .tc-compass-accuracy[data-accuracy='low']::before {
+  background: var(--tc-danger);
+}
+
+.tc-app[data-zen='leaving'] .tc-zen::before {
+  animation: tc-fade-out 220ms ease-in forwards;
+}
+
+.tc-app[data-zen='leaving'] .tc-zen-exit {
+  animation: tc-zen-lift 200ms ease-in forwards;
+}
+
+.tc-app[data-zen='leaving'] .tc-zen .tc-compass-zen {
+  animation: tc-zen-sink 220ms ease-in forwards;
+}
+
+@keyframes tc-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes tc-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes tc-zen-rise {
+  from {
+    opacity: 0;
+    transform: translateY(45%) scale(0.7);
+  }
+}
+
+@keyframes tc-zen-sink {
+  to {
+    opacity: 0;
+    transform: translateY(35%) scale(0.85);
+  }
+}
+
+@keyframes tc-zen-face-in {
+  from {
+    opacity: 0;
+    transform: rotate(-75deg) scale(0.9);
+  }
+}
+
+@keyframes tc-zen-needle-in {
+  from {
+    transform: rotate(-150deg);
+  }
+}
+
+@keyframes tc-zen-meta-in {
+  from {
+    opacity: 0;
+    transform: translateX(-0.75rem);
+  }
+}
+
+@keyframes tc-zen-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-1.5rem);
+  }
+}
+
+@keyframes tc-zen-lift {
+  to {
+    opacity: 0;
+    transform: translateY(-1rem);
+  }
+}
+
+/* App.tsx skips the fade steps too, so zen just appears and goes. */
+@media (prefers-reduced-motion: reduce) {
+  .tc-zen::before,
+  .tc-zen-exit,
+  .tc-zen .tc-compass-zen,
+  .tc-zen .tc-compass-face,
+  .tc-zen .tc-compass-needle svg,
+  .tc-zen .tc-compass-meta {
+    animation: none;
+  }
 }
 
 /* ── Map bottom dock (route options above plan/nav banner) ─ */
@@ -770,140 +1081,236 @@ button {
   gap: 0.35rem;
 }
 
+/* The trip as a timeline: my location, stops, destination. */
 .tc-plan-card {
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-  padding: 0.65rem;
+  padding: 0.4rem;
   border-radius: var(--tc-radius);
   border: 1px solid var(--tc-border);
   background: rgba(8, 18, 14, 0.72);
   box-shadow: var(--tc-shadow);
 }
 
-.tc-plan-row {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 0.65rem;
+.tc-plan-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tc-plan-point {
+  position: relative;
+}
+
+/* Dashed line from each point down to the next. */
+.tc-plan-point:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  left: calc(0.65rem + 1.125rem - 1px);
+  top: calc(0.6rem + 2.25rem + 0.15rem);
+  bottom: calc(-0.2rem - 0.6rem + 0.15rem);
+  width: 2px;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(238, 243, 236, 0.28) 0 4px,
+    transparent 4px 8px
+  );
+  pointer-events: none;
+}
+
+.tc-plan-point-row {
+  display: flex;
   align-items: center;
-  min-height: var(--tc-touch);
-  padding: 0.55rem 0.6rem;
-  border-radius: 12px;
+  gap: 0.75rem;
+  width: 100%;
+  min-height: 3.45rem;
+  padding: 0.6rem 0.65rem;
   border: 1px solid transparent;
-  background: rgba(255, 255, 255, 0.03);
+  border-radius: 12px;
+  background: none;
   color: inherit;
+  font: inherit;
   text-align: left;
 }
 
-button.tc-plan-row {
+button.tc-plan-point-row {
   cursor: pointer;
-  width: 100%;
-  font: inherit;
 }
 
-button.tc-plan-row:active {
-  border-color: var(--tc-border-strong);
+button.tc-plan-point-row:active,
+button.tc-plan-point-row[aria-expanded='true'] {
+  background: rgba(255, 255, 255, 0.045);
+}
+
+/* No destination yet: the place to start. */
+.tc-plan-point-row[data-empty] {
+  border-style: dashed;
+  border-color: rgba(240, 160, 32, 0.45);
   background: var(--tc-accent-soft);
 }
 
-.tc-plan-row-dest {
-  border-style: dashed;
-  border-color: rgba(240, 160, 32, 0.35);
+.tc-plan-point-row[data-empty] strong {
+  font-size: 1.15rem;
 }
 
-.tc-plan-row-fixed {
-  opacity: 0.92;
-}
-
-.tc-plan-badge {
+.tc-plan-icon {
+  position: relative;
+  z-index: 1;
   display: grid;
   place-items: center;
-  width: 1.85rem;
-  height: 1.85rem;
-  border-radius: 999px;
-  font-family: var(--tc-font-display);
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: #06100c;
+  width: 2.25rem;
+  height: 2.25rem;
   flex-shrink: 0;
-}
-
-.tc-plan-badge-start {
+  border-radius: 50%;
+  color: #06100c;
   background: #8aa194;
 }
 
-.tc-plan-badge-end {
-  background: var(--tc-accent);
+.tc-plan-icon[data-kind='start'] {
+  background: #20352b;
+  color: var(--tc-ok);
+  box-shadow: inset 0 0 0 1.5px rgba(79, 207, 132, 0.5);
 }
 
-.tc-plan-badge-fuel {
+.tc-plan-icon[data-kind='fuel'] {
   background: #3dbea5;
 }
 
-.tc-plan-badge-food {
+.tc-plan-icon[data-kind='food'] {
   background: #e07a5f;
 }
 
-.tc-plan-badge-manual {
+.tc-plan-icon[data-kind='manual'] {
   background: #7b8cff;
 }
 
-.tc-plan-row-body {
+.tc-plan-icon[data-kind='destination'] {
+  background: var(--tc-accent);
+}
+
+.tc-plan-point-text {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.1rem;
-  min-width: 0;
+  gap: 0.12rem;
 }
 
-.tc-plan-row-body strong {
-  font-size: 0.95rem;
-  font-weight: 650;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.tc-plan-point-text strong {
+  font-family: var(--tc-font-display);
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
-.tc-plan-row-body span {
+.tc-plan-point-text span {
   color: var(--tc-muted);
-  font-size: 0.72rem;
-  font-family: var(--tc-font-mono);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
-.tc-plan-row-action {
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--tc-accent);
-}
-
-.tc-plan-row-controls {
-  display: flex;
-  gap: 0.2rem;
-}
-
-.tc-plan-icon-btn {
+.tc-plan-point-more {
   display: grid;
   place-items: center;
-  width: 2.1rem;
-  height: 2.1rem;
+  width: 2rem;
+  flex-shrink: 0;
+  color: var(--tc-muted);
+}
+
+.tc-plan-point-action {
+  flex-shrink: 0;
+  color: var(--tc-accent);
+  font-family: var(--tc-font-display);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* Earlier / Later / Remove under an opened stop. */
+.tc-plan-point-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding: 0.1rem 0.5rem 0.6rem 2.9rem;
+}
+
+.tc-plan-point-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-height: 2.5rem;
+  padding: 0 0.65rem;
+  border-radius: 999px;
   border: 1px solid var(--tc-border);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.05);
   color: var(--tc-text);
+  font-family: var(--tc-font-display);
+  font-size: 0.78rem;
+  font-weight: 600;
   cursor: pointer;
 }
 
-.tc-plan-icon-btn:disabled {
+.tc-plan-point-actions button:disabled {
   opacity: 0.35;
   cursor: default;
 }
 
-.tc-plan-icon-danger {
+.tc-plan-point-actions .tc-plan-point-remove {
+  border-color: rgba(255, 107, 74, 0.35);
   color: var(--tc-danger);
+}
+
+/* First visit: what planning involves. */
+.tc-plan-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0.25rem 0.25rem 0;
+  list-style: none;
+  counter-reset: plan-step;
+}
+
+.tc-plan-steps li {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding-left: 2.4rem;
+  counter-increment: plan-step;
+}
+
+.tc-plan-steps li::before {
+  content: counter(plan-step);
+  position: absolute;
+  left: 0;
+  top: 0.05rem;
+  display: grid;
+  place-items: center;
+  width: 1.65rem;
+  height: 1.65rem;
+  border-radius: 50%;
+  border: 1px solid var(--tc-border-strong);
+  color: var(--tc-accent);
+  font-family: var(--tc-font-display);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.tc-plan-steps strong {
+  font-family: var(--tc-font-display);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.tc-plan-steps span {
+  color: var(--tc-muted);
+  font-size: 0.85rem;
+  line-height: 1.4;
 }
 
 .tc-plan-add {
@@ -912,9 +1319,13 @@ button.tc-plan-row:active {
   gap: 0.55rem;
 }
 
+.tc-plan-add .tc-list-heading {
+  margin: 0;
+}
+
 .tc-plan-add-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.5rem;
 }
 
@@ -923,85 +1334,134 @@ button.tc-plan-row:active {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.35rem;
-  min-height: 4.4rem;
-  padding: 0.65rem 0.4rem;
+  gap: 0.15rem;
+  min-height: 5.4rem;
+  padding: 0.7rem 0.35rem 0.6rem;
   border-radius: 14px;
   border: 1px solid var(--tc-border);
   background: rgba(8, 18, 14, 0.65);
   color: var(--tc-text);
-  font-family: var(--tc-font-display);
-  font-size: 0.78rem;
-  font-weight: 650;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font: inherit;
   cursor: pointer;
 }
 
-.tc-plan-add-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
+.tc-plan-add-btn .tc-plan-icon {
+  margin-bottom: 0.3rem;
 }
 
-.tc-plan-add-btn:active:not(:disabled) {
+.tc-plan-add-btn strong {
+  font-family: var(--tc-font-display);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.tc-plan-add-btn span:last-child {
+  color: var(--tc-muted);
+  font-size: 0.72rem;
+}
+
+.tc-plan-add-btn:active {
   border-color: var(--tc-border-strong);
   background: var(--tc-accent-soft);
 }
 
-.tc-plan-add-glyph {
-  display: grid;
-  place-items: center;
-  width: 1.75rem;
-  height: 1.75rem;
-  border-radius: 999px;
-  font-size: 0.8rem;
-  font-weight: 800;
-  color: #06100c;
-}
-
-.tc-plan-add-fuel {
-  background: #3dbea5;
-}
-
-.tc-plan-add-food {
-  background: #e07a5f;
-}
-
-.tc-plan-add-manual {
-  background: #7b8cff;
-}
-
+/* Trip summary: numbers when planned, else progress or a note. */
 .tc-plan-summary {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  padding: 0.15rem 0.15rem 0;
+  gap: 0.6rem;
+  padding: 0.85rem 0.95rem;
+  border-radius: var(--tc-radius);
+  border: 1px solid var(--tc-border);
+  background: var(--tc-bg-elevated);
 }
 
-.tc-plan-summary-line {
+.tc-plan-summary[data-state='ready'],
+.tc-plan-summary[data-state='riding'] {
+  background:
+    linear-gradient(155deg, rgba(240, 160, 32, 0.1), transparent 55%),
+    var(--tc-bg-elevated);
+}
+
+.tc-plan-summary[data-tone='accent'] {
+  border-color: rgba(240, 160, 32, 0.35);
+}
+
+.tc-plan-summary[data-tone='danger'] {
+  border-color: rgba(255, 107, 74, 0.4);
+  background: rgba(255, 107, 74, 0.08);
+}
+
+.tc-plan-summary[data-tone='accent'] .tc-plan-summary-note {
+  color: var(--tc-accent);
+}
+
+.tc-plan-summary[data-tone='danger'] .tc-plan-summary-note {
+  color: var(--tc-danger);
+}
+
+.tc-plan-summary-note {
   margin: 0;
   color: var(--tc-muted);
-  font-size: 0.9rem;
+  font-size: 0.88rem;
+  line-height: 1.45;
 }
 
-.tc-plan-summary-line strong {
-  color: var(--tc-text);
-  font-family: var(--tc-font-mono);
-  font-weight: 600;
-}
-
-.tc-plan-summary-error {
+.tc-plan-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
   margin: 0;
-  color: var(--tc-danger);
-  font-size: 0.8rem;
+}
+
+.tc-plan-stats div {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 0.1rem;
+}
+
+.tc-plan-stats dt {
+  color: var(--tc-muted);
+  font-size: 0.72rem;
   font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.tc-plan-stats dd {
+  margin: 0;
+  font-family: var(--tc-font-display);
+  font-size: 1.45rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.tc-plan-summary-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
+.tc-plan-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.tc-plan-progress > div {
+  height: 100%;
+  background: var(--tc-accent);
+  transition: width 200ms ease;
 }
 
 .tc-plan-actions {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  margin-top: 0.25rem;
   padding-bottom: 0.5rem;
 }
 
@@ -1021,6 +1481,7 @@ button.tc-plan-row:active {
   border: none;
   background: var(--tc-accent);
   color: #1a1205;
+  font-size: 1rem;
 }
 
 .tc-plan-primary:disabled {
@@ -1038,17 +1499,38 @@ button.tc-plan-row:active {
   color: var(--tc-accent);
 }
 
-.tc-plan-secondary:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
 .tc-plan-clear {
   border: none;
   background: transparent;
   color: var(--tc-muted);
   font-size: 0.78rem;
-  min-height: 2.4rem;
+  min-height: 2.6rem;
+}
+
+.tc-plan-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 0.85rem 0.95rem;
+  border-radius: var(--tc-radius);
+  border: 1px solid rgba(255, 107, 74, 0.4);
+  background: rgba(255, 107, 74, 0.08);
+}
+
+.tc-plan-confirm p {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.tc-plan-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.tc-plan-confirm-actions .tc-btn {
+  min-width: 6.5rem;
 }
 
 .tc-plan-search-form {
@@ -1288,77 +1770,6 @@ button.tc-plan-row:active {
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--tc-muted);
-}
-
-.tc-saved-routes {
-  margin: 0 0 1.1rem;
-}
-
-.tc-saved-routes-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  margin-bottom: 0.45rem;
-}
-
-.tc-saved-routes-header .tc-list-heading {
-  margin: 0;
-}
-
-.tc-saved-routes-msg {
-  margin: 0 0 0.55rem;
-  color: var(--tc-accent);
-  font-size: 0.8rem;
-  font-weight: 600;
-}
-
-.tc-saved-list {
-  list-style: none;
-  margin: 0.65rem 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-}
-
-.tc-saved-item {
-  display: flex;
-  flex-direction: column;
-  gap: 0.55rem;
-  padding: 0.75rem 0.8rem;
-  border-radius: 14px;
-  border: 1px solid var(--tc-border);
-  background: rgba(255, 255, 255, 0.03);
-}
-
-.tc-saved-item-body {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  min-width: 0;
-}
-
-.tc-saved-item-name {
-  font-family: var(--tc-font-display);
-  font-size: 0.95rem;
-}
-
-.tc-saved-item-meta {
-  font-family: var(--tc-font-mono);
-  font-size: 0.72rem;
-  color: var(--tc-muted);
-}
-
-.tc-saved-item-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-}
-
-.tc-btn-danger-ghost {
-  color: var(--tc-danger) !important;
-  border-color: rgba(255, 107, 74, 0.35) !important;
 }
 
 .tc-file-input {
@@ -1659,6 +2070,317 @@ button.tc-plan-row:active {
   min-width: 0;
 }
 
+/* ── Library tab ────────────────────────────────────────── */
+
+.tc-library {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.tc-library-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-height: 2.75rem;
+}
+
+.tc-library-head .tc-list-heading {
+  margin: 0;
+}
+
+.tc-library-count {
+  color: var(--tc-text);
+}
+
+.tc-library-import {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2.6rem;
+  padding: 0 0.95rem 0 0.8rem;
+  border-radius: 999px;
+  border: 1px solid var(--tc-border-strong);
+  background: var(--tc-accent-soft);
+  color: var(--tc-accent);
+  font-family: var(--tc-font-display);
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.tc-library-import:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.tc-library-search {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: var(--tc-touch);
+  padding: 0 0.85rem;
+  border-radius: var(--tc-radius-sm);
+  border: 1px solid var(--tc-border);
+  background: var(--tc-bg-elevated);
+  color: var(--tc-muted);
+}
+
+.tc-library-search:focus-within {
+  border-color: var(--tc-border-strong);
+}
+
+.tc-library-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  color: var(--tc-text);
+  font: inherit;
+  font-size: 0.95rem;
+  outline: none;
+}
+
+.tc-library-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-height: 2.75rem;
+  padding: 0.35rem 0.45rem 0.35rem 0.85rem;
+  border-radius: var(--tc-radius-sm);
+  background: rgba(79, 207, 132, 0.1);
+  color: var(--tc-ok);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.tc-library-notice[data-tone='err'] {
+  background: rgba(255, 107, 74, 0.1);
+  color: var(--tc-danger);
+}
+
+.tc-library-notice button {
+  flex-shrink: 0;
+  min-height: 2.2rem;
+  padding: 0 0.9rem;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  background: none;
+  color: inherit;
+  font-family: var(--tc-font-display);
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.tc-library-hint {
+  margin: 0.15rem 0 0;
+  color: var(--tc-muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.tc-library-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Landscape and tablets: two columns of trips. */
+@media (min-width: 700px) {
+  .tc-library-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.tc-trip {
+  display: flex;
+  align-items: stretch;
+  border-radius: var(--tc-radius);
+  border: 1px solid var(--tc-border);
+  background: var(--tc-bg-elevated);
+  overflow: hidden;
+}
+
+/* The whole card, apart from its two icons, opens the trip. */
+.tc-trip-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.75rem 0.25rem 0.75rem 0.75rem;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tc-trip-open:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.tc-trip-thumb {
+  width: 4rem;
+  height: 4rem;
+  flex-shrink: 0;
+  border-radius: 12px;
+  border: 1px solid var(--tc-border);
+  background: radial-gradient(circle at 30% 25%, #1e3529 0%, #0b1712 75%);
+}
+
+.tc-trip-thumb-casing,
+.tc-trip-thumb-line {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.tc-trip-thumb-casing {
+  stroke: rgba(0, 0, 0, 0.55);
+  stroke-width: 5;
+}
+
+/* The map's route colour. */
+.tc-trip-thumb-line {
+  stroke: #f5a623;
+  stroke-width: 2.6;
+}
+
+.tc-trip-thumb-start {
+  fill: var(--tc-ok);
+  stroke: #0b1712;
+  stroke-width: 1.5;
+}
+
+.tc-trip-thumb-stop {
+  fill: var(--tc-text);
+  stroke: #0b1712;
+  stroke-width: 1.2;
+}
+
+.tc-trip-thumb-end {
+  fill: #0b1712;
+  stroke: #f5a623;
+  stroke-width: 2.4;
+}
+
+.tc-trip-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.tc-trip-text strong {
+  font-family: var(--tc-font-display);
+  font-size: 1.02rem;
+  font-weight: 600;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.tc-trip-facts {
+  color: var(--tc-text);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.tc-trip-meta {
+  color: var(--tc-muted);
+  font-size: 0.78rem;
+}
+
+.tc-trip-actions {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.1rem;
+  padding: 0.3rem 0.35rem 0.3rem 0;
+}
+
+.tc-trip-icon {
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--tc-muted);
+  cursor: pointer;
+}
+
+.tc-trip-icon:active:not(:disabled) {
+  background: var(--tc-accent-soft);
+  color: var(--tc-accent);
+}
+
+.tc-trip-icon-danger:active:not(:disabled) {
+  background: rgba(255, 107, 74, 0.14);
+  color: var(--tc-danger);
+}
+
+.tc-trip-icon:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.tc-library-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 1.6rem 1.2rem 1.35rem;
+  border-radius: var(--tc-radius);
+  border: 1px dashed rgba(240, 160, 32, 0.32);
+  background:
+    linear-gradient(160deg, rgba(240, 160, 32, 0.07), transparent 60%),
+    var(--tc-bg-elevated);
+  text-align: center;
+}
+
+.tc-library-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 50%;
+  background: var(--tc-accent-soft);
+  color: var(--tc-accent);
+}
+
+.tc-library-empty strong {
+  font-family: var(--tc-font-display);
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.tc-library-empty p {
+  margin: 0;
+  max-width: 22rem;
+  color: var(--tc-muted);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.tc-library-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+}
+
 .tc-saved-loading {
   display: flex;
   align-items: center;
@@ -1668,82 +2390,571 @@ button.tc-plan-row:active {
   font-size: 0.85rem;
 }
 
-.tc-saved-routes-msg-err {
-  color: var(--tc-danger);
-}
-
 .tc-btn .tc-spinner,
 .tc-btn-ghost .tc-spinner {
   display: inline-block;
 }
 
-.tc-storage {
-  padding: 0.85rem 0.95rem;
-  border-radius: var(--tc-radius);
-  background: var(--tc-bg-elevated);
-  border: 1px solid var(--tc-border);
-}
+/* ── Offline tab ────────────────────────────────────────── */
 
-.tc-storage-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 0.5rem;
-  font-size: 0.9rem;
-}
-
-.tc-storage-label {
-  color: var(--tc-muted);
-  font-weight: 600;
-}
-
-.tc-storage-value {
-  font-family: var(--tc-font-mono);
-  font-size: 0.8rem;
-  color: var(--tc-muted);
-}
-
-.tc-storage-bar {
-  height: 6px;
-  border-radius: 3px;
-  background: #1a2820;
-  overflow: hidden;
-}
-
-.tc-storage-fill {
-  height: 100%;
-  width: 0;
-  background: var(--tc-accent);
-}
-
-.tc-region-list {
+.tc-offline-section {
   display: flex;
   flex-direction: column;
-  gap: 0.55rem;
+  gap: 0.5rem;
 }
 
-.tc-region {
+.tc-offline-section > .tc-list-heading {
+  margin: 0;
+}
+
+.tc-offline-section-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
-  padding: 0.9rem 1rem;
+  gap: 0.75rem;
+  min-height: 2.5rem;
+}
+
+.tc-offline-card {
+  padding: 0.95rem 1rem;
   border-radius: var(--tc-radius);
   background: var(--tc-bg-elevated);
   border: 1px solid var(--tc-border);
 }
 
-.tc-region-name {
-  margin: 0;
+.tc-offline-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.65rem;
+}
+
+.tc-offline-card-head strong {
   font-family: var(--tc-font-display);
-  font-size: 1.05rem;
+  font-size: 1rem;
   font-weight: 600;
 }
 
-.tc-region-meta {
-  margin: 0.2rem 0 0;
+.tc-offline-hint {
+  margin: 0;
   color: var(--tc-muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+/* Road data and places on the phone, at a glance. */
+.tc-offline-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  background:
+    linear-gradient(155deg, rgba(240, 160, 32, 0.09), transparent 55%),
+    var(--tc-bg-elevated);
+}
+
+.tc-offline-none {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.tc-offline-none strong {
+  font-family: var(--tc-font-display);
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.tc-offline-none span {
+  color: var(--tc-muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.tc-offline-total {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.tc-offline-total strong {
+  font-family: var(--tc-font-display);
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.tc-offline-total span {
+  color: var(--tc-muted);
+  font-size: 0.9rem;
+}
+
+.tc-offline-bar {
+  display: flex;
+  gap: 3px;
+  height: 0.6rem;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.tc-offline-bar span {
+  flex-basis: 0;
+  min-width: 6px;
+}
+
+/* One colour per kind of road data, in the bar, legend and list. */
+.tc-offline-bar [data-kind='backbone'],
+.tc-offline-swatch[data-kind='backbone'] {
+  background: var(--tc-accent);
+}
+
+.tc-offline-bar [data-kind='corridor'],
+.tc-offline-swatch[data-kind='corridor'] {
+  background: #5b8def;
+}
+
+.tc-offline-bar [data-kind='connector'],
+.tc-offline-swatch[data-kind='connector'] {
+  background: #3dbea5;
+}
+
+.tc-offline-swatch {
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.tc-offline-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--tc-muted);
+  font-size: 0.8rem;
+}
+
+.tc-offline-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.tc-offline-legend b {
+  color: var(--tc-text);
+  font-weight: 600;
+}
+
+.tc-offline-places {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.15rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--tc-border);
+}
+
+.tc-offline-stat {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 0.6rem;
+}
+
+.tc-offline-stat-icon {
+  grid-row: span 2;
+  color: var(--tc-accent);
+}
+
+.tc-offline-stat strong {
+  font-family: var(--tc-font-display);
+  font-size: 1.15rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.tc-offline-stat span {
+  color: var(--tc-muted);
+  font-size: 0.78rem;
+}
+
+/* Downloads: the network the phone is on. */
+.tc-offline-net {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--tc-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.tc-offline-net[data-network='wifi'] {
+  background: rgba(79, 207, 132, 0.13);
+  color: var(--tc-ok);
+}
+
+.tc-offline-net[data-network='cellular'] {
+  background: var(--tc-accent-soft);
+  color: var(--tc-accent);
+}
+
+.tc-offline-net[data-network='none'] {
+  background: rgba(255, 107, 74, 0.12);
+  color: var(--tc-danger);
+}
+
+.tc-offline-downloads .tc-download-networks {
+  margin-bottom: 0.65rem;
+}
+
+.tc-offline-notice {
+  margin: 0 0 0.6rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: var(--tc-radius-sm);
+  background: var(--tc-accent-soft);
+  color: var(--tc-accent);
   font-size: 0.85rem;
+  font-weight: 600;
+}
+
+/* Updates: one row each for the app and the places data. */
+.tc-offline-rows {
+  padding-top: 0.15rem;
+  padding-bottom: 0.15rem;
+}
+
+.tc-offline-row {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.75rem 0;
+}
+
+.tc-offline-row + .tc-offline-row {
+  border-top: 1px solid var(--tc-border);
+}
+
+.tc-offline-row-icon {
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex-shrink: 0;
+  border-radius: 12px;
+  background: var(--tc-accent-soft);
+  color: var(--tc-accent);
+}
+
+.tc-offline-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.tc-offline-row-text strong {
+  font-family: var(--tc-font-display);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.tc-offline-row-text span {
+  color: var(--tc-muted);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.tc-offline-row-text [data-tone='ok'] {
+  color: var(--tc-ok);
+}
+
+.tc-offline-row-text [data-tone='accent'] {
+  color: var(--tc-accent);
+}
+
+.tc-offline-row-text [data-tone='danger'] {
+  color: var(--tc-danger);
+}
+
+.tc-offline-row .tc-btn {
+  flex-shrink: 0;
+  min-width: 5rem;
+  min-height: 2.6rem;
+  margin: 0;
+  padding: 0 0.85rem;
+  font-size: 0.85rem;
+}
+
+/* Narrow phones: the text needs the room more than the icons do. */
+@media (max-width: 380px) {
+  .tc-offline-row-icon {
+    display: none;
+  }
+}
+
+.tc-offline-progress {
+  height: 4px;
+  margin-top: 0.35rem;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.tc-offline-progress > div {
+  height: 100%;
+  background: var(--tc-accent);
+  transition: width 200ms ease;
+}
+
+/* Saved road data. */
+.tc-offline-link {
+  min-height: 2.5rem;
+  padding: 0 0.25rem;
+  border: none;
+  background: none;
+  color: var(--tc-accent);
+  font-family: var(--tc-font-display);
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.tc-offline-link-danger {
+  color: var(--tc-danger);
+}
+
+.tc-offline-link:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.tc-offline-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.9rem 1rem;
+  border-radius: var(--tc-radius);
+  border: 1px solid rgba(255, 107, 74, 0.4);
+  background: rgba(255, 107, 74, 0.08);
+}
+
+.tc-offline-confirm p {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.tc-offline-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.tc-offline-confirm-actions .tc-btn {
+  min-width: 6.5rem;
+}
+
+.tc-btn-danger {
+  background: var(--tc-danger);
+  color: #1c0905;
+}
+
+.tc-btn-danger:active:not(:disabled) {
+  background: #e0553a;
+}
+
+.tc-offline-status {
+  margin: 0;
+  color: var(--tc-ok);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.tc-offline-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.tc-offline-group {
+  border-radius: var(--tc-radius);
+  background: var(--tc-bg-elevated);
+  border: 1px solid var(--tc-border);
+  overflow: hidden;
+}
+
+.tc-offline-group > summary,
+.tc-offline-details > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: var(--tc-touch);
+  padding: 0.8rem 1rem;
+  list-style: none;
+  cursor: pointer;
+}
+
+.tc-offline-group > summary::-webkit-details-marker,
+.tc-offline-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.tc-offline-chevron {
+  flex-shrink: 0;
+  color: var(--tc-muted);
+  transition: transform 160ms ease;
+}
+
+.tc-offline-group[open] .tc-offline-chevron,
+.tc-offline-details[open] .tc-offline-chevron {
+  transform: rotate(180deg);
+}
+
+.tc-offline-group-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.tc-offline-group-text strong {
+  font-family: var(--tc-font-display);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.tc-offline-group-text span {
+  color: var(--tc-muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.tc-offline-group-hint {
+  margin: -0.35rem 1rem 0.6rem 2.4rem;
+  color: var(--tc-muted);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.tc-offline-packs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0 0.55rem 0.55rem;
+  list-style: none;
+}
+
+.tc-offline-pack {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.35rem 0.45rem 0.8rem;
+  border-radius: var(--tc-radius-sm);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.tc-offline-pack-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.tc-offline-pack-text strong {
+  font-size: 0.9rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.tc-offline-pack-text span {
+  color: var(--tc-muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.tc-offline-icon-btn {
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--tc-muted);
+  cursor: pointer;
+}
+
+.tc-offline-icon-btn:active:not(:disabled) {
+  background: rgba(255, 107, 74, 0.14);
+  color: var(--tc-danger);
+}
+
+.tc-offline-icon-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* How routing works: folded away at the bottom. */
+.tc-offline-details {
+  border-radius: var(--tc-radius);
+  border: 1px solid var(--tc-border);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.tc-offline-details-title {
+  flex: 1;
+  font-family: var(--tc-font-display);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.tc-offline-details-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 0 1rem 0.95rem;
+}
+
+.tc-offline-facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.4rem 1rem;
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.tc-offline-facts dt {
+  color: var(--tc-muted);
+}
+
+.tc-offline-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.tc-offline-credits {
+  margin: 0;
+  padding: 0 0.5rem 0.5rem;
+  color: var(--tc-muted);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  text-align: center;
 }
 
 .tc-region-badge {
@@ -1929,6 +3140,16 @@ button.tc-plan-row:active {
 .tc-route-type-option-active {
   background: var(--tc-accent);
   color: #1a1205;
+}
+
+.tc-download-networks {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* "Run in background" under the Plan tab's progress line. */
+.tc-plan-background {
+  align-self: flex-start;
+  margin-top: 0.35rem;
 }
 
 /* Settings: two switches side by side. */
@@ -2119,13 +3340,6 @@ button.tc-plan-row:active {
   border-color: var(--tc-accent);
   background: var(--tc-accent);
   color: #1a1205;
-}
-
-.tc-route-empty {
-  margin: 0;
-  color: var(--tc-muted);
-  font-size: 0.72rem;
-  line-height: 1.35;
 }
 
 .tc-route-progress-spinner {
@@ -2323,15 +3537,20 @@ button.tc-plan-row:active {
     align-items: flex-start;
     width: auto;
     max-width: min(62vw, 26rem);
-  }
-
-  .tc-compass-dial {
-    width: 40px;
-    height: 40px;
+    --tc-dial: 40px;
   }
 
   .tc-compass-heading {
     font-size: 0.95rem;
+  }
+
+  /* A corner gauge, leaving the width of the screen to the route. */
+  .tc-zen .tc-compass-zen {
+    --tc-dial: clamp(6.5rem, 34vh, 10rem);
+    left: calc(0.75rem + var(--tc-safe-left));
+    right: auto;
+    bottom: calc(0.75rem + var(--tc-safe-bottom));
+    margin: 0;
   }
 
   .tc-map-dock {

@@ -179,7 +179,7 @@ export function PoiFinderSheet({
                 className="tc-plan-hit"
                 role="option"
                 onClick={() =>
-                  onPick(createTripStop(kind, hit.coordinate, hit.name))
+                  onPick(createTripStop(kind, hit.coordinate, hit.name, hit.subtitle))
                 }
               >
                 <span className="tc-plan-hit-name">{hit.name}</span>

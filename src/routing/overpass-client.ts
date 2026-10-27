@@ -1,6 +1,7 @@
 import type { RoutingProgressListener } from './routing-progress';
 import { abortError, isAbortError, throwIfAborted } from './abort';
 import { overpassScheduler } from './overpass-scheduler';
+import { downloadPolicy } from '../services/download-policy.service';
 
 const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
@@ -43,6 +44,8 @@ export async function fetchOverpass<T>(
     maxAttempts?: number;
     /** Called when an attempt failed and another mirror will be tried. */
     onRetry?: () => void;
+    /** Road data for routing: waits while the Wi-Fi only setting holds it. */
+    roadData?: boolean;
   } = {},
 ): Promise<{ elements?: T[] }> {
   const { onProgress, signal } = options;
@@ -53,6 +56,7 @@ export async function fetchOverpass<T>(
 
   for (let attemptIndex = 0; attemptIndex < maxAttempts; attemptIndex++) {
     throwIfAborted(signal);
+    if (options.roadData) await downloadPolicy.waitForRoads(signal);
     mirror = nextAvailableMirror(mirror);
     const endpoint = OVERPASS_ENDPOINTS[mirror]!;
     const release = await overpassScheduler.acquire(signal);

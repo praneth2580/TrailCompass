@@ -30,7 +30,8 @@ TrailCompass keeps you on roads bikes are allowed on, speaks every turn into you
 - **Routes for bikes.** Choose Fastest, Shortest or Less traffic, and compare up to three routes. Expressways closed to two-wheelers are avoided unless you allow them.
 - **Voice turn-by-turn.** Spoken prompts, timed to your speed, go straight into your helmet headset. Miss a turn and the route recalculates on its own.
 - **Keeps going on weak signal.** Routes are calculated on your phone. Once a route is planned, turn-by-turn, voice prompts and stop suggestions work without a connection.
-- **Built for the handlebar.** A full-screen ride view while you're moving, a screen that stays on, a compass, and large touch targets that are easy to hit.
+- **Built for the handlebar.** A full-screen ride view while you're moving, a screen that stays on, and large touch targets that are easy to hit. Tap the compass for zen mode: just the map, your route and a big compass.
+- **Plans while you do other things.** Send a long route plan to the background and follow it in a notification, with Pause and Stop. Set downloads to Wi-Fi only to save mobile data.
 - **Save and share rides.** Keep trips in your library and open them later without planning again. Share a route as a file with your riding group.
 - **Always up to date.** TrailCompass tells you when a new version is out and installs it from inside the app. Fuel and food data refreshes every month on its own.
 

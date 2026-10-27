@@ -1,6 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
 import type { PoiKind } from '../types/trip-stop';
+import { downloadPolicy } from './download-policy.service';
 
 /**
  * Where the fuel and food places come from, and keeping them fresh without
@@ -60,6 +61,8 @@ class HttpStatusError extends Error {
 
 let location: Promise<PoiDataLocation> | null = null;
 let running: Promise<void> | null = null;
+/** Set while a found update waits for Wi-Fi. */
+let stopWaitingForWifi: (() => void) | null = null;
 let status: PoiUpdateStatus = { state: 'idle' };
 const statusListeners = new Set<(status: PoiUpdateStatus) => void>();
 const changeListeners = new Set<() => void>();
@@ -164,7 +167,17 @@ async function runCheck(force: boolean): Promise<void> {
       );
       setStatus({
         state: 'done',
-        message: `Up to date · Overture ${current.release ?? remote.release}`,
+        message: `Up to date · data from ${formatPoiRelease(current.release ?? remote.release)}`,
+      });
+      return;
+    }
+
+    if (!downloadPolicy.canDownload()) {
+      // Not marked as checked, so this runs again once Wi-Fi is back.
+      waitForWifi();
+      setStatus({
+        state: 'done',
+        message: `Newer data from ${formatPoiRelease(remote.release)} · downloads on Wi-Fi`,
       });
       return;
     }
@@ -175,11 +188,20 @@ async function runCheck(force: boolean): Promise<void> {
     location = null;
     await removeReleases((release) => release !== remote.release);
     for (const listener of changeListeners) listener();
-    setStatus({ state: 'done', message: `Updated to Overture ${remote.release}` });
+    setStatus({ state: 'done', message: `Updated to the ${formatPoiRelease(remote.release)} data` });
   } catch (e) {
     const detail = e instanceof Error ? e.message : 'network error';
     setStatus({ state: 'error', message: `Couldn't update places (${detail})` });
   }
+}
+
+function waitForWifi(): void {
+  stopWaitingForWifi ??= downloadPolicy.subscribe(() => {
+    if (!downloadPolicy.canDownload()) return;
+    stopWaitingForWifi?.();
+    stopWaitingForWifi = null;
+    void checkForPoiUpdate();
+  });
 }
 
 async function downloadRelease(manifest: PoiManifest & { release: string }): Promise<void> {
@@ -296,6 +318,15 @@ function checkTile(text: string): void {
 }
 
 /** Orders release names like 2026-10-21.0; a missing release sorts first. */
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** "2026-10-21.0" → "21 Oct 2026"; anything else as it is. */
+export function formatPoiRelease(release: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(release);
+  const month = match ? MONTHS[Number(match[2]) - 1] : undefined;
+  return match && month ? `${Number(match[3])} ${month} ${match[1]}` : release;
+}
+
 export function compareReleases(
   a: string | null | undefined,
   b: string | null | undefined,

@@ -4,11 +4,13 @@ import { SavedRoutesPanel } from './SavedRoutesPanel';
 interface LibraryScreenProps {
   refreshKey: number;
   onOpenRoute: (route: SavedRoute) => void;
+  onPlanTrip: () => void;
 }
 
 export function LibraryScreen({
   refreshKey,
   onOpenRoute,
+  onPlanTrip,
 }: LibraryScreenProps) {
   return (
     <main className="tc-main tc-main-library">
@@ -16,12 +18,15 @@ export function LibraryScreen({
         <p className="tc-downloads-brand">TrailCompass</p>
         <h1 className="tc-section-title">Library</h1>
         <p className="tc-section-copy">
-          Your saved trips live here. Open one to preview on the map, or import
-          a <code>.trailcompass.json</code> file from another device.
+          Trips you've saved, ready to ride again without planning.
         </p>
       </header>
 
-      <SavedRoutesPanel refreshKey={refreshKey} onOpenRoute={onOpenRoute} />
+      <SavedRoutesPanel
+        refreshKey={refreshKey}
+        onOpenRoute={onOpenRoute}
+        onPlanTrip={onPlanTrip}
+      />
     </main>
   );
 }

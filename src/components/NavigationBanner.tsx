@@ -10,6 +10,8 @@ interface NavigationBannerProps {
   /** The trip was edited after this route was planned. */
   routeOutdated?: boolean;
   onPlan?: () => void;
+  /** Set while planning can move to a background notification. */
+  onRunInBackground?: () => void;
   onStart?: () => void;
   onStop?: () => void;
   onExitRide?: () => void;
@@ -25,6 +27,7 @@ export function NavigationBanner({
   canSaveRoute = false,
   routeOutdated = false,
   onPlan,
+  onRunInBackground,
   onStart,
   onStop,
   onExitRide,
@@ -118,7 +121,18 @@ export function NavigationBanner({
               : ''}
           </p>
         ) : null}
-        {canSaveRoute && !rideMode ? (
+        {state.status === 'planning' && onRunInBackground ? (
+          <div className="tc-nav-route-tools">
+            <button
+              type="button"
+              className="tc-tool-chip"
+              onClick={onRunInBackground}
+            >
+              <BackgroundIcon />
+              Run in background
+            </button>
+          </div>
+        ) : canSaveRoute && !rideMode ? (
           <div className="tc-nav-route-tools">
             <button
               type="button"
@@ -175,6 +189,21 @@ export function NavigationBanner({
         )}
       </div>
     </div>
+  );
+}
+
+export function BackgroundIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" aria-hidden>
+      <path
+        d="M12 4v10m0 0-4-4m4 4 4-4"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M5 19h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
   );
 }
 

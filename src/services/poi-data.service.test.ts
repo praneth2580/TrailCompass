@@ -4,6 +4,29 @@ import type { PoiUpdateStatus } from './poi-data.service';
 /** In-memory stand-in for the app's data folder. */
 const disk = vi.hoisted(() => new Map<string, string>());
 
+/** The Wi-Fi only setting: `allowed` is false on mobile data with it on. */
+const policy = vi.hoisted(() => {
+  const listeners = new Set<() => void>();
+  return {
+    allowed: true,
+    listeners,
+    set(allowed: boolean) {
+      this.allowed = allowed;
+      for (const listener of [...listeners]) listener();
+    },
+  };
+});
+
+vi.mock('./download-policy.service', () => ({
+  downloadPolicy: {
+    canDownload: () => policy.allowed,
+    subscribe: (listener: () => void) => {
+      policy.listeners.add(listener);
+      return () => policy.listeners.delete(listener);
+    },
+  },
+}));
+
 vi.mock('@capacitor/core', () => ({
   Capacitor: {
     isNativePlatform: () => true,
@@ -86,6 +109,8 @@ async function load() {
 
 beforeEach(() => {
   disk.clear();
+  policy.allowed = true;
+  policy.listeners.clear();
   const prefs = new Map<string, string>();
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => prefs.get(key) ?? null,
@@ -104,6 +129,15 @@ describe('compareReleases', () => {
     expect(service.compareReleases('2026-10-21.10', '2026-10-21.9')).toBeGreaterThan(0);
     expect(service.compareReleases('2026-10-21.0', '2026-10-21.0')).toBe(0);
     expect(service.compareReleases(null, '2026-10-21.0')).toBeLessThan(0);
+  });
+});
+
+describe('formatPoiRelease', () => {
+  it('shows a release as its date', async () => {
+    const { service } = await load();
+    expect(service.formatPoiRelease('2026-10-21.0')).toBe('21 Oct 2026');
+    expect(service.formatPoiRelease('2026-01-05.3')).toBe('5 Jan 2026');
+    expect(service.formatPoiRelease('custom')).toBe('custom');
   });
 });
 
@@ -137,12 +171,32 @@ describe('checkForPoiUpdate', () => {
       'poi-data/2026-11-18.0/manifest.json',
     ]);
     expect(changed).toHaveBeenCalledTimes(1);
-    expect(last()).toEqual({ state: 'done', message: 'Updated to Overture 2026-11-18.0' });
+    expect(last()).toEqual({ state: 'done', message: 'Updated to the 18 Nov 2026 data' });
     expect(await service.currentPoiData()).toEqual({
       base: 'https://localhost/_capacitor_file_/data/poi-data/2026-11-18.0',
       release: '2026-11-18.0',
       downloaded: true,
     });
+  });
+
+  it('waits for Wi-Fi when downloads are set to Wi-Fi only', async () => {
+    serve(manifest('2026-11-18.0'));
+    policy.allowed = false;
+    const { service, last } = await load();
+
+    await service.checkForPoiUpdate();
+
+    expect(disk.size).toBe(0);
+    expect(last()).toEqual({
+      state: 'done',
+      message: 'Newer data from 18 Nov 2026 · downloads on Wi-Fi',
+    });
+
+    policy.set(true);
+    await vi.waitFor(() =>
+      expect(last()).toEqual({ state: 'done', message: 'Updated to the 18 Nov 2026 data' }),
+    );
+    expect(disk.has('poi-data/2026-11-18.0/manifest.json')).toBe(true);
   });
 
   it('downloads nothing when the bundled data is already the latest', async () => {
@@ -154,7 +208,7 @@ describe('checkForPoiUpdate', () => {
     expect(fetchMock.mock.calls.map(([url]) => url)).not.toContain(
       `${REMOTE}/${BUNDLED_RELEASE}/fuel/73_18.json`,
     );
-    expect(last()).toEqual({ state: 'done', message: `Up to date · Overture ${BUNDLED_RELEASE}` });
+    expect(last()).toEqual({ state: 'done', message: 'Up to date · data from 21 Oct 2026' });
     expect(service.lastPoiCheckAt()).not.toBeNull();
   });
 

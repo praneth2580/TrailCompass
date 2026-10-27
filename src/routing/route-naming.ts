@@ -28,6 +28,26 @@ export function formatEtaShort(seconds: number): string {
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** When something was saved: "today 12:58", "yesterday", "3 days ago" or "6 Oct". */
+export function formatSavedAt(iso: string, now = new Date()): string {
+  const saved = new Date(iso);
+  const days = Math.round(
+    (new Date(now.toDateString()).getTime() - new Date(saved.toDateString()).getTime()) / DAY_MS,
+  );
+  if (days <= 0) {
+    return `today ${saved.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
+  }
+  if (days === 1) return 'yesterday';
+  if (days < 7) return `${days} days ago`;
+  return saved.toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    year: saved.getFullYear() === now.getFullYear() ? undefined : 'numeric',
+  });
+}
+
 function formatStamp(date: Date): string {
   return date.toLocaleString(undefined, {
     month: 'short',

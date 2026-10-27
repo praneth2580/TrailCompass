@@ -28,14 +28,22 @@ import {
   calculatedToSavedRoute,
   savedToCalculatedRoute,
   type SavedRoute,
+  type SavedPlaces,
 } from '../types/route';
 import { suggestRouteName } from '../routing/route-naming';
 import { routeLibrary } from './route-library.service';
 import { isAbortError } from '../routing/abort';
+import { downloadPolicy } from './download-policy.service';
 
 export type NavigationListener = (state: NavigationState) => void;
 
 export type PlanRouteResult = 'ready' | 'cancelled' | 'error';
+
+const WAITING_FOR_WIFI: RoutingProgress = {
+  phase: 'downloading-roads',
+  label: 'Waiting for Wi-Fi · road downloads are set to Wi-Fi only',
+  percent: null,
+};
 
 const ARRIVE_THRESHOLD_M = 25;
 const REROUTE_COOLDOWN_MS = 8_000;
@@ -80,6 +88,10 @@ export class NavigationService {
   private planningLink: { from: Coordinate; to: Coordinate } | null = null;
   /** Destination and stops the offered routes were planned for. */
   private plannedTrip: { end: Coordinate; waypoints: Coordinate[] } | null = null;
+  /** The latest planRoute() call, so a paused plan can carry on. */
+  private lastPlan: { start: Coordinate; end: Coordinate; waypoints: Coordinate[] } | null =
+    null;
+  private settledListeners = new Set<(result: PlanRouteResult) => void>();
 
   constructor(adapter: RoutingAdapter = defaultRoutingAdapter) {
     this.adapter = adapter;
@@ -333,7 +345,8 @@ export class NavigationService {
     });
   }
 
-  async saveActiveRoute(name?: string): Promise<SavedRoute> {
+  /** `places` names the destination and stops, for when the trip is reopened. */
+  async saveActiveRoute(name?: string, places?: SavedPlaces): Promise<SavedRoute> {
     const route = this.getActiveCalculatedRoute();
     if (!route) throw new Error('No route to save');
     const label = name?.trim() || suggestRouteName(route, this.profile);
@@ -341,6 +354,7 @@ export class NavigationService {
       start: route.coordinates[0],
       end: this.state.destination ?? route.coordinates[route.coordinates.length - 1],
       waypoints: this.waypoints,
+      places,
     });
   }
 
@@ -352,7 +366,7 @@ export class NavigationService {
     );
   }
 
-  buildSavedSnapshot(name?: string): SavedRoute | null {
+  buildSavedSnapshot(name?: string, places?: SavedPlaces): SavedRoute | null {
     const route = this.getActiveCalculatedRoute();
     if (!route) return null;
     const label = name?.trim() || suggestRouteName(route, this.profile);
@@ -362,6 +376,7 @@ export class NavigationService {
         this.state.destination ??
         route.coordinates[route.coordinates.length - 1],
       waypoints: this.waypoints,
+      places,
     });
   }
 
@@ -381,6 +396,45 @@ export class NavigationService {
   }
 
   async planRoute(
+    start: Coordinate,
+    end: Coordinate,
+    waypoints?: Coordinate[],
+  ): Promise<PlanRouteResult> {
+    this.lastPlan = { start, end, waypoints: waypoints ? [...waypoints] : [] };
+    const result = await this.runPlan(start, end, waypoints);
+    for (const listener of [...this.settledListeners]) listener(result);
+    return result;
+  }
+
+  /** Told how each planRoute() ended, including plans started elsewhere. */
+  onPlanSettled(listener: (result: PlanRouteResult) => void): () => void {
+    this.settledListeners.add(listener);
+    return () => this.settledListeners.delete(listener);
+  }
+
+  /** True while planRoute() is working (not while GPS is still resolving). */
+  isPlanningRoute(): boolean {
+    return this.state.status === 'planning' && this.planAbort != null;
+  }
+
+  /** Stop planning for now. Roads downloaded so far stay cached. */
+  pausePlanning(): void {
+    if (!this.isPlanningRoute()) return;
+    this.cancelPlanning();
+    this.setState({ ...this.state, message: 'Route planning paused' });
+  }
+
+  /**
+   * Plan the paused trip again. Cached roads are reused, so it carries on
+   * from where it stopped. Null when there is nothing to resume.
+   */
+  resumePlanning(): Promise<PlanRouteResult> | null {
+    const plan = this.lastPlan;
+    if (!plan || this.state.status === 'planning') return null;
+    return this.planRoute(plan.start, plan.end, plan.waypoints);
+  }
+
+  private async runPlan(
     start: Coordinate,
     end: Coordinate,
     waypoints?: Coordinate[],
@@ -735,7 +789,8 @@ export class NavigationService {
   }
 
   private bindProgress(token: number): () => void {
-    return offlineRoutingAdapter.subscribeProgress((progress: RoutingProgress) => {
+    let latest: RoutingProgress | undefined;
+    const show = (progress: RoutingProgress) => {
       if (token !== this.planToken) return;
       if (
         this.state.status !== 'planning' &&
@@ -748,7 +803,24 @@ export class NavigationService {
         progress,
         message: progress.label || this.state.message,
       });
+    };
+    const offProgress = offlineRoutingAdapter.subscribeProgress((progress: RoutingProgress) => {
+      latest = progress;
+      // Keep saying why nothing moves until Wi-Fi is back.
+      if (!downloadPolicy.isWaiting()) show(progress);
     });
+    let wasWaiting = false;
+    const offPolicy = downloadPolicy.subscribe(() => {
+      const waiting = downloadPolicy.isWaiting();
+      if (waiting === wasWaiting) return;
+      wasWaiting = waiting;
+      if (waiting) show(WAITING_FOR_WIFI);
+      else if (latest) show(latest);
+    });
+    return () => {
+      offProgress();
+      offPolicy();
+    };
   }
 
   private invalidateRouting(): void {
@@ -852,6 +924,7 @@ export class NavigationService {
 
   private setState(state: NavigationState): void {
     this.state = state;
+    downloadPolicy.setRiding(state.status === 'navigating' || state.status === 'rerouting');
     for (const listener of this.listeners) {
       listener(state);
     }

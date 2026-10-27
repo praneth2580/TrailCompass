@@ -233,12 +233,13 @@ Refs: `previewToken` (cancels a stale preview), `planTripKey` (a JSON snapshot o
 
 #### Rendered layout
 
-`<div class="tc-app">` has `data-screen`, `data-nav`, `data-ride` and `data-map-pick` attributes. The CSS uses these to hide and show UI (§14). It contains the active screen and the bottom tab bar. On the Map tab:
+`<div class="tc-app">` has `data-screen`, `data-nav`, `data-ride`, `data-map-pick` and `data-zen` attributes. The CSS uses these to hide and show UI (§14). It contains the active screen and the bottom tab bar. On the Map tab:
 
 - `MapView` (full bleed)
 - A map-pick banner with Cancel, when picking
 - The **Recenter** button (navigating and not following) or the **Locate** button (not immersive)
-- A HUD with the GPS chip (accuracy, stale flag, km/h) and the `CompassWidget`
+- A HUD with the GPS chip (accuracy, stale flag, km/h) and the `CompassWidget`; tapping the compass opens zen mode
+- In zen mode, only the map and the zen layer: an Exit button and a large `CompassWidget`. `data-zen` steps through `entering`, `on` and `leaving`, timed to the fades in `index.css`
 - A dock with `RouteOptionsPanel` above `NavigationBanner`
 - `SaveShareRouteSheet` and `StatusToast`
 
@@ -259,7 +260,7 @@ All components are presentational. They receive props, and where they need data 
 - Shows a status badge while the online style is loading or has failed.
 
 #### `CompassWidget.tsx`
-A dial with N/E/S/W labels and a rotating needle, plus the heading in degrees and an accuracy label. It shows an **Enable** button when there is no reading yet or the error mentions permission (iOS-style `requestPermission`).
+An SVG dial (scaled by the CSS variable `--tc-dial`) with a needle that points along the heading, plus the heading in degrees and an accuracy label. The `zen` variant adds 5° ticks, numerals, a north marker, a heading beam and the 8-point direction. The needle angle is unwrapped, so crossing north turns the short way. With `onOpen`, the compass is a button (the HUD opens zen mode with it). It shows an **Enable** button when there is no reading yet or the error mentions permission (iOS-style `requestPermission`).
 
 #### `NavigationBanner.tsx`
 The main status and action strip at the bottom of the Map tab.
@@ -267,7 +268,7 @@ The main status and action strip at the bottom of the Map tab.
 - **Progress bar:** shown only when `percent` and `bytesTotal` are both known (a real byte count).
 - **Remaining:** distance and ETA when choosing or navigating.
 - **Off route** flag.
-- **Save / Share** chips when `canSaveRoute` is true and ride mode is off.
+- **Run in background** chip while a route is planning, on Android (`background-planning.service.ts`); otherwise **Save / Share** chips when `canSaveRoute` is true and ride mode is off.
 - **Actions:** idle, error or arrived → **Plan route**. Choosing → **Start**. Navigating → **Stop**, plus **Exit** in ride mode.
 
 #### `RouteOptionsPanel.tsx`
@@ -286,12 +287,12 @@ A small pill with a tone of `info`, `loading` (spinner), `success` (✓) or `err
 ### 6.2 Plan tab
 
 #### `PlanScreen.tsx`
-A list-first trip builder.
-- **Itinerary card:** **A** = My location (live coordinates), then each stop row (fuel F, food E, custom +) with ↑, ↓ and ✕ controls, then **B** = Destination (tap to edit).
-- **"Along the way"** buttons: **Fuel** and **Food** open `StopSuggestSheet`. **Custom** opens `StopPickerSheet` in manual mode.
-- **Summary line:** planning status, or the route's distance, ETA and stop count, or a hint.
-- **Actions:** **Preview on map** (needs a destination and a ready engine), **Start navigation** (needs a calculated route), **Clear trip**.
-- Stops added from suggestion or POI sheets go through `tripPlanner.addStop(stop, activeRoute.coordinates)`. They are **inserted in order of position along the current route**, not just added to the end.
+A list-first trip builder. A `TripState` (`empty`, `unplanned`, `planning`, `ready`, `riding`, `outdated`, `error`) decides the summary and the buttons.
+- **Trip timeline:** My location, each stop, then the destination, joined by a dashed line, with an icon per kind (fuel, food, place, flag). Stops show their full name and note (the suggestion's reason, or the place's address). Tapping a stop shows **Earlier**, **Later** and **Remove**; tapping the destination opens `StopPickerSheet`. With no destination it is a prominent **Where to?**, followed by three short steps on how planning works.
+- **Add a stop** (once there is a destination): **Fuel** and **Food** open `StopSuggestSheet`; **Place** opens `StopPickerSheet` in manual mode.
+- **Trip summary:** distance, riding time, stops and arrival time once planned (remaining distance and time while riding); planning progress with **Run in background**; or a note when the trip changed or planning failed.
+- **Actions** follow the state: **Preview on map**, then **Start navigation** and **Show on map** (`onShowMap`, no re-planning), **Update route** after edits, **Try again** after an error, **Back to the ride** while navigating. **Clear trip** asks first.
+- Stops added from any sheet go through `tripPlanner.addStop(stop, activeRoute.coordinates)`. With a route they are **inserted in order of position along it**, not just added to the end.
 
 #### `StopPickerSheet.tsx`
 A search sheet for the destination or a custom stop.
@@ -315,20 +316,25 @@ A manual list of fuel or food places, with two scopes:
 ### 6.3 Library tab
 
 #### `LibraryScreen.tsx`
-A header plus `SavedRoutesPanel`.
+A header plus `SavedRoutesPanel`. `onPlanTrip` takes the rider to the Plan tab from an empty library.
 
 #### `SavedRoutesPanel.tsx`
-- Lists saved routes, newest `updatedAt` first, with distance, ETA and date.
-- Each row has **Open**, **Share** and **Delete**. Share downloads a file on the web or opens the share sheet on Android.
-- **Import file** accepts `.json`, `.geojson` and `.trailcompass.json` (§8.12).
+- Lists saved trips, newest `updatedAt` first. Each card shows a thumbnail of the route's shape (start, stops and end), distance, time, stops, route type and when it was saved (`formatSavedAt` in `route-naming.ts`).
+- Tapping a card opens the trip on the map. **Share** (downloads a file on the web, opens the share sheet on Android) and **Delete** are icon buttons. Delete offers **Undo**, which puts the trip back with its original dates (`RouteRepository.restoreRoute`).
+- A search box filters by name once there are six or more trips. Wide screens show two columns.
+- **Import** accepts `.json`, `.geojson` and `.trailcompass.json` (§8.12).
+- An empty library explains how trips get saved, with **Plan a trip** and **Import a file**.
 - Reloads when `refreshKey` changes (App increments it after a save).
 
 ### 6.4 Offline tab
 
 #### `OfflineScreen.tsx`
-- Shows the routing engine's kind, message and attribution.
-- Lists the **saved road packs** (label, size, date) with a total, plus **Delete** and **Delete all**.
-- Shows engine cards: the in-memory network label, and whether Valhalla tiles are active.
+Top to bottom:
+- **On this phone:** the road data saved, as a total and a bar split by kind (major roads, route corridors, local streets), and the fuel and food places built in.
+- **Downloads:** the Wi-Fi only setting (`download-policy.service.ts`), with the network the phone is on.
+- **Updates:** a row each for the app and the fuel and food data, with status, progress and a Check button.
+- **Saved road data** (`RoadDataList.tsx`): packs grouped by kind (`ROAD_PACK_KINDS` in `road-pack.service.ts`), titled by their main road names (stored on new packs as `roads`) or else their middle point. Each has a delete button; **Delete all** asks first.
+- **How routing works:** folded away; the engine, its status and Valhalla. Then the data credits.
 - It does **not** download map regions. That flow is still a stub (§11).
 
 ### 6.5 Unused component
@@ -659,6 +665,7 @@ Walks the route coordinates and measures the change in bearing at each point:
 ```
 
 - The file extension is `.trailcompass.json`. File names are built from the route name (lower case, hyphens, at most 48 characters).
+- `route.places` (optional) names the destination and each stop, so a reopened or imported trip shows "Chiplun" rather than "Stop 1". `parseRouteFile` keeps the stop names only if there is one per waypoint, with a known kind.
 - `parseRouteFile` accepts three inputs: **(1)** the envelope above, **(2)** a bare `SavedRoute`, or **(3)** a GeoJSON `Feature` or `LineString`. A GeoJSON import has no instructions. `normalizeSavedRoute` checks there are at least 2 coordinates and fills in defaults.
 - `toGeoJson` exports a GeoJSON `Feature`. No screen offers this option yet.
 
@@ -866,10 +873,11 @@ Turns on an immersive map view automatically once the bike is clearly moving dur
 
 ### 16.1 Android project (`android/`)
 
-- Generated by Capacitor. `MainActivity` extends `BridgeActivity` and adds nothing.
+- Generated by Capacitor. `MainActivity` extends `BridgeActivity` and registers the app's own plugins: `AppUpdaterPlugin` (in-app updates) and `DownloadsPlugin` (background planning and network type).
 - `applicationId` / `namespace`: `com.example.trailcompass`. **This is a placeholder and must change before publishing.**
-- `minSdk 23`, `compileSdk` and `targetSdk 35`. `versionCode 6`, `versionName "1.1.0"`.
-- Permissions: `INTERNET`, `ACCESS_COARSE_LOCATION`, `ACCESS_FINE_LOCATION`. There is **no** background-location permission and no foreground service, so GPS updates can stop when the screen turns off or the app goes to the background.
+- `minSdk 23`, `compileSdk` and `targetSdk 35`. `release.mjs` bumps `versionCode` and `versionName`.
+- Permissions: `INTERNET`, `ACCESS_COARSE_LOCATION`, `ACCESS_FINE_LOCATION`, `REQUEST_INSTALL_PACKAGES`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_DATA_SYNC`, `POST_NOTIFICATIONS` and `ACCESS_NETWORK_STATE`.
+- `DownloadService` is a `dataSync` foreground service that runs only while a route plans in the background. There is **no** background-location permission or location service, so GPS updates can still stop when the screen turns off or the app goes to the background.
 - A `FileProvider` (`${applicationId}.fileprovider`, `res/xml/file_paths.xml`) lets the Share plugin send exported route files.
 - `capacitor.config.ts`: `webDir: 'dist'`, `androidScheme: 'https'` (needed for geolocation, which requires a secure context), `allowMixedContent: false`.
 
@@ -910,7 +918,7 @@ Turns on an immersive map view automatically once the bike is clearly moving dur
 |---|---|---|
 | Basemap tiles | **Always** | OpenFreeMap |
 | UI fonts | First load (falls back to system fonts) | Google Fonts |
-| Road data for routing | **Yes, unless** the area is in the memory cache or a road pack, or Valhalla tiles are bundled | Overpass (2 mirrors) |
+| Road data for routing | **Yes, unless** the area is in the memory cache or a road pack, or Valhalla tiles are bundled. With Downloads set to Wi-Fi only, planning waits for Wi-Fi; rerouting mid-ride never waits | Overpass (5 mirrors) |
 | Place search | Yes | Nominatim |
 | Fuel and food POIs, stop suggestions | No for India (bundled Overture tiles); live results added where those are few | Nominatim, then Overpass |
 | Fuel and food data updates | Optional; checked daily, the app keeps working on its current copy | GitHub Pages |
@@ -945,6 +953,10 @@ These came up while reading the code for this guide. Each one points to the rele
 
 ### Fixed on 2026-10-27
 
+- **Zen mode.** Tapping the compass leaves only the map, the route and a large compass, with an Exit button. The map still pans and zooms; taps never change the trip. Entering and leaving fade and slide; reduced-motion settings switch it instantly.
+- **The compass needle and the map's position arrow turn the short way across north**, instead of spinning almost a full turn.
+- **Route planning can run in the background** with a progress notification: Pause, Resume and Stop (`background-planning.service.ts`, `DownloadsPlugin.java`, `DownloadService.java`). Pausing keeps the roads downloaded so far, so Resume carries on from there.
+- **A Wi-Fi only setting for downloads** (Offline → Downloads, `download-policy.service.ts`). On mobile data, road downloads for planning wait for Wi-Fi and say so; fuel and food data and app updates wait too. Rerouting during a ride always downloads.
 - **Road packs are saved on Android.** `storage-manager.ts` now writes with `recursive: true`; before, writes into the missing `road-packs/` folder failed silently.
 - **Road downloads no longer stall on a dead Overpass server.** `overpass-client.ts` also tries `lz4.` and `z.overpass-api.de`, the two servers behind overpass-api.de, which often answer when its front door returns 502. A server that sends nothing within 75 s is dropped and skipped for 10 minutes, and a busy one for 1 minute. While a retry is under way, the progress line reads "map server busy, trying another". If an area still fails, the error says how many loaded; they stay cached, so planning again continues.
 - **Overpass replies with a `runtime error` remark** (HTTP 200 with a cut-off element list) are treated as a failure and retried on the next mirror instead of being cached (`overpass-client.ts`).
@@ -980,7 +992,7 @@ Each fix below is covered by tests in `src/routing/*.test.ts` (`npm test`).
 
 1. **Valhalla ignores the route type** and always returns a single route, using `motorcycle` costing.
 2. **On Android the compass likely shows relative, not magnetic, heading.** The service listens only to `deviceorientation`. Chrome and WebView provide true-north readings on `deviceorientationabsolute` ([compass.service.ts:76](../src/services/compass.service.ts#L76)).
-3. **There is no background location.** Without a foreground service or background permission, the WebView may stop receiving GPS updates when the screen locks.
+3. **There is no background location.** The only foreground service runs while a route plans in the background; there is none for riding and no background-location permission, so the WebView may stop receiving GPS updates when the screen locks.
 4. **Trip and navigation state is lost on restart.** Only saved routes and road packs survive.
 5. **`sharp` is not a declared dependency.** `generate-icons.mjs` needs it, but today it is installed only indirectly (through `@jansoft/mbujkanji-valhalla-wasm` → `next`). Add it to `devDependencies`.
 6. **`release.mjs` needs `android/app/src/main/res/xml/config.xml`, which is gitignored.** It exists only after a `cap sync`, so a fresh clone fails at the version-bump step. The script also supports a token embedded in the `origin` URL, which means storing a credential in `.git/config`.

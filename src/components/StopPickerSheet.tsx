@@ -94,7 +94,8 @@ export function StopPickerSheet({
       : 'Search, use your location, or tap the map once.';
 
   const selectHit = (hit: PlaceHit) => {
-    onPick(createTripStop(kind, hit.coordinate, hit.name));
+    // The address line becomes the stop's note in the Plan list.
+    onPick(createTripStop(kind, hit.coordinate, hit.name, hit.subtitle));
   };
 
   const useGps = () => {

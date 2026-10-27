@@ -5,6 +5,7 @@ import {
   Marker,
   NavigationControl,
   setWorkerUrl,
+  type PaddingOptions,
 } from 'maplibre-gl';
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 import type { Coordinate } from '../routing/routing-adapter';
@@ -43,7 +44,7 @@ export interface MapAdapter {
     headingDegrees?: number | null,
     options?: { follow?: boolean; lockZoom?: number },
   ): void;
-  fitRoute(coordinates: Coordinate[]): void;
+  fitRoute(coordinates: Coordinate[], padding?: number | PaddingOptions): void;
   drawRoute(coordinates: Coordinate[], routeIndex?: number): void;
   clearRoute(): void;
   switchToRegion(_regionId: string): Promise<{ ok: boolean; message: string }>;
@@ -77,6 +78,8 @@ export class MapLibreAdapter implements MapAdapter {
   private positionMarker: Marker | null = null;
   private positionEl: HTMLDivElement | null = null;
   private positionMode: 'dot' | 'arrow' = 'dot';
+  /** Unwrapped arrow rotation, so crossing north turns the short way. */
+  private arrowAngle: number | null = null;
   private destinationMarker: Marker | null = null;
   private stopMarkers: Marker[] = [];
   private framedToPosition = false;
@@ -384,27 +387,32 @@ export class MapLibreAdapter implements MapAdapter {
       el.className = 'tc-position-marker tc-position-marker-arrow';
       if (!el.querySelector('.tc-position-arrow-spin')) {
         el.innerHTML = POSITION_ARROW_HTML;
+        this.arrowAngle = null;
       }
       const spin = el.querySelector('.tc-position-arrow-spin') as HTMLElement | null;
       const heading =
         headingDegrees != null && Number.isFinite(headingDegrees)
           ? headingDegrees
           : 0;
-      if (spin) spin.style.transform = `rotate(${heading}deg)`;
+      const prev = this.arrowAngle;
+      this.arrowAngle =
+        prev == null ? heading : prev + ((((heading - prev) % 360) + 540) % 360) - 180;
+      if (spin) spin.style.transform = `rotate(${this.arrowAngle}deg)`;
     } else {
       el.className = 'tc-position-marker';
       el.innerHTML = '';
     }
   }
 
-  fitRoute(coordinates: Coordinate[]): void {
+  /** `padding` keeps the route clear of overlays (e.g. zen mode's compass). */
+  fitRoute(coordinates: Coordinate[], padding: number | PaddingOptions = 48): void {
     if (!this.map || coordinates.length === 0) return;
     const first = coordinates[0] as [number, number];
     const bounds = coordinates.reduce(
       (b, c) => b.extend(c as [number, number]),
       new LngLatBounds(first, first),
     );
-    this.map.fitBounds(bounds, { padding: 48, duration: 600 });
+    this.map.fitBounds(bounds, { padding, duration: 600 });
   }
 
   drawRoute(coordinates: Coordinate[], routeIndex = 0): void {

@@ -7,6 +7,17 @@ import type { RoutingProfileId } from '../routing/routing-profiles';
 
 export type { Coordinate, TurnInstruction };
 
+/**
+ * Names for a trip's destination and stops (in `waypoints` order), so a
+ * reopened trip shows "Chiplun" rather than "Stop 1".
+ */
+export interface SavedPlaces {
+  end?: string;
+  /** The destination's address line. */
+  endNotes?: string;
+  stops?: Array<{ name: string; kind: 'fuel' | 'food' | 'manual'; notes?: string }>;
+}
+
 export interface SavedRoute {
   id: string;
   name: string;
@@ -21,6 +32,8 @@ export interface SavedRoute {
   instructions: TurnInstruction[];
   profile?: RoutingProfileId;
   label?: string;
+  /** Absent on trips saved before names were kept. */
+  places?: SavedPlaces;
 }
 
 /** Portable file envelope for sharing routes across devices. */
@@ -48,6 +61,7 @@ export function calculatedToSavedRoute(
     waypoints?: Coordinate[];
     id?: string;
     createdAt?: string;
+    places?: SavedPlaces;
   },
 ): SavedRoute {
   const coords = route.coordinates;
@@ -69,6 +83,7 @@ export function calculatedToSavedRoute(
     instructions: route.instructions,
     profile: route.profile,
     label: route.label,
+    ...(extras?.places ? { places: extras.places } : {}),
   };
 }
 

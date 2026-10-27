@@ -1,5 +1,5 @@
 import type { Coordinate } from './routing-adapter';
-import type { SavedRoute, TrailCompassRouteFile } from '../types/route';
+import type { SavedPlaces, SavedRoute, TrailCompassRouteFile } from '../types/route';
 
 export const ROUTE_FILE_FORMAT = 'trailcompass-route' as const;
 export const ROUTE_FILE_VERSION = 1 as const;
@@ -147,5 +147,38 @@ function normalizeSavedRoute(route: SavedRoute): SavedRoute {
     instructions: Array.isArray(route.instructions) ? route.instructions : [],
     profile: route.profile,
     label: route.label,
+    ...(placesFor(route) ? { places: placesFor(route) } : {}),
+  };
+}
+
+/** Stop names from a file, only if they match its stops; else none. */
+function placesFor(route: SavedRoute): SavedPlaces | undefined {
+  const places = route.places as unknown;
+  if (!places || typeof places !== 'object') return undefined;
+  const { end, endNotes, stops } = places as { end?: unknown; endNotes?: unknown; stops?: unknown };
+  const waypoints = Array.isArray(route.waypoints) ? route.waypoints.length : 0;
+  const named =
+    Array.isArray(stops) &&
+    stops.length === waypoints &&
+    stops.every(
+      (stop) =>
+        stop != null &&
+        typeof stop.name === 'string' &&
+        ['fuel', 'food', 'manual'].includes(stop.kind) &&
+        (stop.notes == null || typeof stop.notes === 'string'),
+    )
+      ? (stops as NonNullable<SavedPlaces['stops']>).map((stop) => ({
+          name: stop.name.slice(0, 120),
+          kind: stop.kind,
+          ...(stop.notes ? { notes: stop.notes.slice(0, 200) } : {}),
+        }))
+      : undefined;
+  const endName = typeof end === 'string' && end.trim() ? end.slice(0, 120) : undefined;
+  const endLine = typeof endNotes === 'string' && endNotes.trim() ? endNotes.slice(0, 200) : undefined;
+  if (!named && !endName) return undefined;
+  return {
+    ...(endName ? { end: endName } : {}),
+    ...(endName && endLine ? { endNotes: endLine } : {}),
+    ...(named ? { stops: named } : {}),
   };
 }
