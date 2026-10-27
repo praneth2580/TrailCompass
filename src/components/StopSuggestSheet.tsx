@@ -19,7 +19,10 @@ import {
   suggestFuelStops,
   type MealKind,
   type StopSuggestion,
+  type SuggestOutcome,
 } from '../services/stop-suggest.service';
+import { isAbortError } from '../routing/abort';
+import { useBackHandler } from '../hooks/useBackHandler';
 
 type SuggestPhase = 'idle' | 'routing' | 'searching';
 
@@ -60,9 +63,12 @@ export function StopSuggestSheet({
   const [suggestions, setSuggestions] = useState<StopSuggestion[]>([]);
   const [phase, setPhase] = useState<SuggestPhase>('idle');
   const [error, setError] = useState<string | null>(null);
+  /** Explains an empty or partial result; not an error. */
+  const [note, setNote] = useState<string | null>(null);
   const [addedIds, setAddedIds] = useState<Set<string>>(() => new Set());
   // Bumped whenever the sheet closes or switches kind so late results drop.
   const runToken = useRef(0);
+  const runAbort = useRef<AbortController | null>(null);
 
   const busy = phase !== 'idle';
   const hasRoute = route != null && route.coordinates.length >= 2;
@@ -72,6 +78,7 @@ export function StopSuggestSheet({
     setSuggestions([]);
     setPhase('idle');
     setError(null);
+    setNote(null);
     setAddedIds(new Set());
     setTankKm(loadTankRangeKm());
     setDepartTime(loadDepartTime());
@@ -80,13 +87,21 @@ export function StopSuggestSheet({
 
   useEffect(() => {
     runToken.current += 1;
+    // Closing or switching kind stops searches still queued for the network.
+    return () => runAbort.current?.abort();
   }, [sessionKey]);
+
+  useBackHandler(open, onClose);
 
   async function runSuggest() {
     const token = runToken.current;
     const stale = () => token !== runToken.current;
+    runAbort.current?.abort();
+    const abort = new AbortController();
+    runAbort.current = abort;
 
     setError(null);
+    setNote(null);
     setSuggestions([]);
     try {
       let target: CalculatedRoute | null = hasRoute ? route : null;
@@ -101,39 +116,31 @@ export function StopSuggestSheet({
       }
 
       setPhase('searching');
+      let outcome: SuggestOutcome;
       if (kind === 'fuel') {
         saveTankRangeKm(tankKm);
-        const next = await suggestFuelStops({
+        outcome = await suggestFuelStops({
           route: target,
           tankRangeKm: tankKm,
           existingCoordinates,
+          signal: abort.signal,
         });
-        if (stale()) return;
-        setSuggestions(next);
-        if (next.length === 0) {
-          setError(
-            'Trip is shorter than a tank leg, or no stations found at fill points',
-          );
-        }
       } else {
         saveDepartTime(departTime);
         saveMealKinds(meals);
-        const next = await suggestFoodStops({
+        outcome = await suggestFoodStops({
           route: target,
           departTime,
           meals,
           existingCoordinates,
+          signal: abort.signal,
         });
-        if (stale()) return;
-        setSuggestions(next);
-        if (next.length === 0) {
-          setError(
-            'No meal windows fall during this trip, or no places near those ETAs',
-          );
-        }
       }
-    } catch (e) {
       if (stale()) return;
+      setSuggestions(outcome.suggestions);
+      setNote(outcome.note ?? null);
+    } catch (e) {
+      if (stale() || isAbortError(e)) return;
       setError(e instanceof Error ? e.message : 'Suggestion failed');
     } finally {
       if (!stale()) setPhase('idle');
@@ -264,9 +271,13 @@ export function StopSuggestSheet({
               {planningLabel ?? 'Planning route…'}
             </p>
           ) : phase === 'searching' ? (
-            <p className="tc-plan-hit-empty">Searching OpenStreetMap…</p>
-          ) : error && suggestions.length === 0 ? (
-            <p className="tc-plan-hit-empty">{error}</p>
+            <p className="tc-plan-hit-empty">
+              {kind === 'fuel'
+                ? 'Finding stations along the route…'
+                : 'Finding places to eat along the route…'}
+            </p>
+          ) : (error || note) && suggestions.length === 0 ? (
+            <p className="tc-plan-hit-empty">{error ?? note}</p>
           ) : suggestions.length === 0 ? (
             <p className="tc-plan-hit-empty">
               {hasRoute
@@ -302,7 +313,14 @@ export function StopSuggestSheet({
               );
             })
           )}
+          {note && suggestions.length > 0 && phase === 'idle' ? (
+            <p className="tc-plan-hit-empty">{note}</p>
+          ) : null}
         </div>
+
+        <p className="tc-sheet-hint">
+          Places: Overture Maps Foundation · © OpenStreetMap contributors
+        </p>
 
         <div className="tc-sheet-actions tc-sheet-actions-single">
           <button

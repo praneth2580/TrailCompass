@@ -73,6 +73,8 @@ export class LocationService {
     }
 
     return new Promise<GpsFix>((resolve, reject) => {
+      // subscribe() replays the old fix synchronously, before it returns.
+      let unsub: () => void = () => {};
       const timer = window.setTimeout(() => {
         unsub();
         if (this.lastFix) {
@@ -88,8 +90,8 @@ export class LocationService {
         );
       }, timeoutMs);
 
-      const unsub = this.subscribe((fix, error) => {
-        if (fix) {
+      unsub = this.subscribe((fix, error) => {
+        if (fix && !isFixStale(fix)) {
           window.clearTimeout(timer);
           unsub();
           resolve(fix);

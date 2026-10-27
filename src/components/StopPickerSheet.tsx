@@ -9,6 +9,7 @@ import {
   type TripStop,
 } from '../types/trip-stop';
 import { formatDistanceShort } from '../routing/route-naming';
+import { useBackHandler } from '../hooks/useBackHandler';
 
 export type StopPickerMode = 'destination' | 'manual';
 
@@ -48,6 +49,8 @@ export function StopPickerSheet({
     setBusy(false);
     setError(null);
   }
+
+  useBackHandler(open, onClose);
 
   if (!open) return null;
 

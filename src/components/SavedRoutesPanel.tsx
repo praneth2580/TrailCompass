@@ -73,7 +73,8 @@ export function SavedRoutesPanel({
     setRowBusy({ id: route.id, action: 'share' });
     setMessage(null);
     try {
-      await routeLibrary.exportAndShare(route, 'trailcompass');
+      const shared = await routeLibrary.exportAndShare(route, 'trailcompass');
+      if (!shared) return;
       setMessageTone('ok');
       setMessage(
         Capacitor.isNativePlatform()

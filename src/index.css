@@ -103,6 +103,20 @@ button {
   background: #0a1511;
 }
 
+/* Kept mounted behind other tabs so the map does not reload.
+   Hidden but still sized, so camera fits stay valid. */
+.tc-main-map[data-hidden='true'] {
+  position: fixed;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* Beats children that opt back in (map badge, MapLibre attribution). */
+.tc-app .tc-main-map[data-hidden='true'] * {
+  visibility: hidden;
+}
+
 .tc-map-shell {
   position: absolute;
   inset: 0;

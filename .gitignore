@@ -34,3 +34,13 @@ android/local.properties
 *.apk
 *.aab
 *.keystore
+*.jks
+
+# Python (scripts/build-poi-tiles.py)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# GitHub Pages build output (.github/workflows/poi-data.yml)
+_site/

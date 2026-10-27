@@ -9,6 +9,8 @@ import type { Coordinate } from '../routing/routing-adapter';
 
 interface MapViewProps {
   fix: GpsFix | null;
+  /** False while another tab is shown; the map stays mounted behind it. */
+  visible?: boolean;
   followGps?: boolean;
   /** When true, show a heading arrow instead of the idle GPS dot. */
   navigating?: boolean;
@@ -20,6 +22,7 @@ interface MapViewProps {
 
 export function MapView({
   fix,
+  visible = true,
   followGps = true,
   navigating = false,
   onMapClick,
@@ -81,15 +84,20 @@ export function MapView({
   }, [followGps]);
 
   useEffect(() => {
+    mapService.setVisible(visible);
+  }, [visible]);
+
+  useEffect(() => {
     if (!readyRef.current || !fix) return;
     // Always move the marker; camera only follows when followGps is on.
-    // While navigating, keep a fixed street-level zoom.
+    // While navigating, keep a fixed street-level zoom. Re-runs when the
+    // map is shown again so the camera catches up with the rider.
     mapService.showPosition([fix.longitude, fix.latitude], fix.headingDegrees, {
       follow: followGps,
       lockZoom:
         navigating && followGps ? NAVIGATION_FOLLOW_ZOOM : undefined,
     });
-  }, [fix, followGps, navigating]);
+  }, [fix, followGps, navigating, visible]);
 
   const showBadge = !status.ok;
 

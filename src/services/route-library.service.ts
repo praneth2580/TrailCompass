@@ -53,10 +53,11 @@ export class RouteLibraryService {
     return routeRepository.deleteRoute(id);
   }
 
+  /** Resolves false when the rider dismisses the share sheet. */
   async exportAndShare(
     route: SavedRoute,
     kind: RouteExportKind = 'trailcompass',
-  ): Promise<void> {
+  ): Promise<boolean> {
     const body =
       kind === 'geojson' ? toGeoJson(route) : serializeRouteFile(route);
     const fileName =
@@ -66,7 +67,7 @@ export class RouteLibraryService {
 
     if (!Capacitor.isNativePlatform()) {
       downloadTextFile(fileName, body);
-      return;
+      return true;
     }
 
     await Filesystem.mkdir({
@@ -95,14 +96,23 @@ export class RouteLibraryService {
         files: [uri],
         dialogTitle: 'Share route',
       });
-    } catch {
-      // Fallback for platforms that only accept url.
+      return true;
+    } catch (e) {
+      if (isShareCancelled(e)) return false;
+    }
+
+    // Fallback for platforms that only accept url.
+    try {
       await Share.share({
         title: route.name,
         text: `TrailCompass route · ${formatKm(route.distanceMeters)}`,
         url: uri,
         dialogTitle: 'Share route',
       });
+      return true;
+    } catch (e) {
+      if (isShareCancelled(e)) return false;
+      throw e;
     }
   }
 
@@ -128,6 +138,11 @@ function downloadTextFile(fileName: string, body: string): void {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+/** The Share plugin rejects with "Share canceled" when the sheet is dismissed. */
+function isShareCancelled(e: unknown): boolean {
+  return e instanceof Error && /cancel/i.test(e.message);
 }
 
 function formatKm(meters: number): string {

@@ -17,6 +17,8 @@ interface RouteOptionsPanelProps {
   onProfileChange: (profile: RoutingProfileId) => void;
   allowExpressways: boolean;
   onAllowExpresswaysChange: (allow: boolean) => void;
+  voiceGuidance: boolean;
+  onVoiceGuidanceChange: (enabled: boolean) => void;
   onSelectAlternative: (index: number) => void;
   onStartNavigation: (index: number) => void;
   onToggleShowAll: (showAll: boolean) => void;
@@ -31,6 +33,8 @@ export function RouteOptionsPanel({
   onProfileChange,
   allowExpressways,
   onAllowExpresswaysChange,
+  voiceGuidance,
+  onVoiceGuidanceChange,
   onSelectAlternative,
   onStartNavigation,
   onToggleShowAll,
@@ -147,6 +151,23 @@ export function RouteOptionsPanel({
                 onClick={() => onAllowExpresswaysChange(!allowExpressways)}
               >
                 {allowExpressways ? 'Allowed' : 'Avoided'}
+              </button>
+            </div>
+            <div className="tc-route-section-row">
+              <p className="tc-route-section-label">
+                Voice prompts · spoken turns while navigating
+              </p>
+              <button
+                type="button"
+                className={
+                  voiceGuidance
+                    ? 'tc-route-toggle tc-route-toggle-on'
+                    : 'tc-route-toggle'
+                }
+                aria-pressed={voiceGuidance}
+                onClick={() => onVoiceGuidanceChange(!voiceGuidance)}
+              >
+                {voiceGuidance ? 'On' : 'Off'}
               </button>
             </div>
           </div>

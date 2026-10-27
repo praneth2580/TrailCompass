@@ -199,6 +199,51 @@ export function pointAlongPolylineMeters(
   };
 }
 
+/**
+ * Points every `stepMeters` between `fromMeters` and `toMeters` along the
+ * route, both ends included (clamped to the route). One pass over the route.
+ */
+export function samplePolylineMeters(
+  route: Coordinate[],
+  fromMeters: number,
+  toMeters: number,
+  stepMeters: number,
+): Array<{ coordinate: Coordinate; alongMeters: number }> {
+  if (route.length === 0 || stepMeters <= 0) return [];
+  const total = polylineLengthMeters(route);
+  const from = Math.max(0, Math.min(fromMeters, total));
+  const to = Math.max(from, Math.min(toMeters, total));
+
+  const targets: number[] = [];
+  for (let t = from; t < to; t += stepMeters) targets.push(t);
+  targets.push(to);
+
+  const out: Array<{ coordinate: Coordinate; alongMeters: number }> = [];
+  let walked = 0;
+  let i = 1;
+  for (const target of targets) {
+    while (i < route.length) {
+      const seg = haversineMeters(route[i - 1]!, route[i]!);
+      if (walked + seg >= target) break;
+      walked += seg;
+      i += 1;
+    }
+    if (i >= route.length) {
+      out.push({ coordinate: route[route.length - 1]!, alongMeters: total });
+      continue;
+    }
+    const a = route[i - 1]!;
+    const b = route[i]!;
+    const seg = haversineMeters(a, b);
+    const t = seg > 0 ? (target - walked) / seg : 0;
+    out.push({
+      coordinate: [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t],
+      alongMeters: target,
+    });
+  }
+  return out;
+}
+
 /** Checkpoints every `intervalMeters` along the route (excludes start; may include near-end). */
 export function pointsAlongPolylineEveryMeters(
   route: Coordinate[],

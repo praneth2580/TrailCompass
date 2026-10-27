@@ -2,17 +2,27 @@ import type { CalculatedRoute, Coordinate } from '../routing/routing-adapter';
 import {
   distanceAlongPolylineMeters,
   pointAlongPolylineMeters,
-  pointsAlongPolylineEveryMeters,
   polylineLengthMeters,
+  samplePolylineMeters,
 } from '../routing/geo';
+import { isAbortError } from '../routing/abort';
 import { formatDistanceShort } from '../routing/route-naming';
-import { findPois } from './poi-search.service';
+import { findPois, isGenericName } from './poi-search.service';
 import type { PlaceHit, PoiKind } from '../types/trip-stop';
 
 /** Use this fraction of a full tank before planning the next fill. */
 export const FUEL_RANGE_BUFFER = 0.7;
-const FUEL_SEARCH_RADIUS_M = 5_000;
-const FOOD_SEARCH_RADIUS_M = 4_000;
+/** Look for a pump from this share of a tank leg onward (not too early)… */
+const FUEL_WINDOW_START = 0.5;
+/** …up to this share past the leg's end (eating into the 30% reserve). */
+const FUEL_WINDOW_OVERRUN = 0.05;
+/** How far off the route a pump may be. */
+const FUEL_SEARCH_RADIUS_M = 2_500;
+/** Look for food this far before and after where the meal falls. */
+const FOOD_WINDOW_M = 15_000;
+const FOOD_SEARCH_RADIUS_M = 1_500;
+/** Route stretches are sampled this finely for the corridor search. */
+const STRETCH_STEP_M = 1_000;
 
 export type MealKind = 'breakfast' | 'lunch' | 'dinner';
 
@@ -59,6 +69,12 @@ export interface StopSuggestion {
   reason: string;
   alongMeters: number;
   meal?: MealKind;
+}
+
+export interface SuggestOutcome {
+  suggestions: StopSuggestion[];
+  /** Explains an empty or partial result (e.g. no stop needed, a gap). */
+  note?: string;
 }
 
 const PREFS_TANK = 'tc.tankRangeKm';
@@ -136,50 +152,89 @@ export function saveMealKinds(meals: MealKind[]): void {
 
 /**
  * Suggest fuel stations spaced by usable tank range along the route.
+ * Each fill is searched over the last stretch of its tank leg, and the
+ * next leg starts from the pump actually picked.
  */
 export async function suggestFuelStops(options: {
   route: CalculatedRoute;
   tankRangeKm: number;
   buffer?: number;
   existingCoordinates?: Coordinate[];
-}): Promise<StopSuggestion[]> {
+  signal?: AbortSignal;
+}): Promise<SuggestOutcome> {
   const routeCoords = options.route.coordinates;
   if (routeCoords.length < 2) {
     throw new Error('Preview a route first so fuel can be spaced along it');
   }
 
   const buffer = options.buffer ?? FUEL_RANGE_BUFFER;
-  const intervalM = Math.max(25_000, options.tankRangeKm * 1000 * buffer);
-  const total = polylineLengthMeters(routeCoords);
-  if (total < intervalM * 0.4) {
-    return [];
+  const legM = Math.max(25_000, options.tankRangeKm * 1000 * buffer);
+  const totalM = polylineLengthMeters(routeCoords);
+  if (totalM <= legM) {
+    return {
+      suggestions: [],
+      note: `This ${formatDistanceShort(totalM)} trip fits in one tank leg (${formatDistanceShort(legM)}, 70% of your range) — no fuel stop needed. Use Browse list to add one anyway.`,
+    };
   }
 
-  const checkpoints = pointsAlongPolylineEveryMeters(routeCoords, intervalM);
   const suggestions: StopSuggestion[] = [];
   const used = new Set<string>();
   markExisting(used, options.existingCoordinates);
+  const gaps: number[] = [];
+  let searchError: unknown = null;
+  let lastFillM = 0;
 
-  for (const cp of checkpoints) {
-    const hits = await findPois({
-      kind: 'fuel',
-      near: cp.coordinate,
-      radiusMeters: FUEL_SEARCH_RADIUS_M,
-      limit: 10,
-    });
-    const best = pickBestAlongRoute(hits, routeCoords, used);
-    if (!best) continue;
-    used.add(placeKey(best));
+  while (lastFillM + legM < totalM) {
+    const targetM = lastFillM + legM;
+    const fromM = lastFillM + legM * FUEL_WINDOW_START;
+    const toM = Math.min(totalM, targetM + legM * FUEL_WINDOW_OVERRUN);
+    const stretch = samplePolylineMeters(routeCoords, fromM, toM, STRETCH_STEP_M);
+
+    let hits: PlaceHit[] = [];
+    try {
+      hits = await findPois({
+        kind: 'fuel',
+        route: stretch.map((p) => p.coordinate),
+        radiusMeters: FUEL_SEARCH_RADIUS_M,
+        limit: 40,
+        signal: options.signal,
+      });
+    } catch (e) {
+      if (isAbortError(e)) throw e;
+      searchError = e;
+    }
+
+    const best = pickBest(hits, stretch, used, (alongM) =>
+      alongM <= targetM
+        ? (targetM - alongM) * 0.02
+        : (alongM - targetM) * 0.2,
+    );
+    if (!best) {
+      gaps.push(targetM);
+      lastFillM = targetM;
+      continue;
+    }
+
+    used.add(placeKey(best.place));
+    const sinceLabel = lastFillM === 0 ? 'from the start' : 'after the last fill';
     suggestions.push({
-      id: `fuel-${suggestions.length}-${best.id}`,
+      id: `fuel-${suggestions.length}-${best.place.id}`,
       kind: 'fuel',
-      place: best,
-      alongMeters: cp.alongMeters,
-      reason: `Fill around ${formatDistanceShort(cp.alongMeters)} (≈${Math.round(options.tankRangeKm * buffer)} km tank legs)`,
+      place: best.place,
+      alongMeters: best.alongMeters,
+      reason: `${formatDistanceShort(best.alongMeters)} into the trip · ${formatDistanceShort(best.alongMeters - lastFillM)} ${sinceLabel}`,
     });
+    lastFillM = best.alongMeters;
   }
 
-  return suggestions;
+  if (suggestions.length === 0 && searchError) throw searchError;
+  return {
+    suggestions,
+    note:
+      gaps.length > 0
+        ? `No station found near ${gaps.map((m) => formatDistanceShort(m)).join(', ')} — fill up earlier there.`
+        : undefined,
+  };
 }
 
 /**
@@ -190,12 +245,15 @@ export async function suggestFoodStops(options: {
   departTime: string;
   meals: MealKind[];
   existingCoordinates?: Coordinate[];
-}): Promise<StopSuggestion[]> {
+  signal?: AbortSignal;
+}): Promise<SuggestOutcome> {
   const routeCoords = options.route.coordinates;
   if (routeCoords.length < 2) {
     throw new Error('Preview a route first so meals can match your ETA');
   }
-  if (options.meals.length === 0) return [];
+  if (options.meals.length === 0) {
+    return { suggestions: [], note: 'Pick at least one meal' };
+  }
 
   const departMinutes = parseTimeToMinutes(options.departTime);
   const durationSec = Math.max(1, options.route.durationSeconds);
@@ -205,6 +263,9 @@ export async function suggestFoodStops(options: {
   const suggestions: StopSuggestion[] = [];
   const used = new Set<string>();
   markExisting(used, options.existingCoordinates);
+  const missed: string[] = [];
+  let mealsDuringTrip = 0;
+  let searchError: unknown = null;
 
   for (const mealId of options.meals) {
     const window = MEAL_WINDOWS.find((m) => m.id === mealId);
@@ -216,6 +277,7 @@ export async function suggestFoodStops(options: {
       arriveMinutes,
     );
     if (target == null) continue;
+    mealsDuringTrip += 1;
 
     const elapsedMin = target - departMinutes;
     const alongMeters = Math.min(
@@ -224,29 +286,64 @@ export async function suggestFoodStops(options: {
     );
     const onRoute = pointAlongPolylineMeters(routeCoords, alongMeters);
     if (!onRoute) continue;
+    const stretch = samplePolylineMeters(
+      routeCoords,
+      onRoute.alongMeters - FOOD_WINDOW_M,
+      onRoute.alongMeters + FOOD_WINDOW_M,
+      STRETCH_STEP_M,
+    );
 
-    const hits = await findPois({
-      kind: 'food',
-      near: onRoute.coordinate,
-      radiusMeters: FOOD_SEARCH_RADIUS_M,
-      limit: 12,
-    });
-    const best = pickBestAlongRoute(hits, routeCoords, used);
-    if (!best) continue;
-    used.add(placeKey(best));
+    let hits: PlaceHit[] = [];
+    try {
+      hits = await findPois({
+        kind: 'food',
+        route: stretch.map((p) => p.coordinate),
+        radiusMeters: FOOD_SEARCH_RADIUS_M,
+        limit: 40,
+        signal: options.signal,
+      });
+    } catch (e) {
+      if (isAbortError(e)) throw e;
+      searchError = e;
+    }
+
+    const best = pickBest(
+      hits,
+      stretch,
+      used,
+      (along) => Math.abs(along - onRoute.alongMeters) * 0.05,
+    );
+    if (!best) {
+      missed.push(window.label.toLowerCase());
+      continue;
+    }
+    used.add(placeKey(best.place));
 
     const clock = formatMinutes(target);
     suggestions.push({
-      id: `food-${mealId}-${best.id}`,
+      id: `food-${mealId}-${best.place.id}`,
       kind: 'food',
-      place: best,
-      alongMeters: onRoute.alongMeters,
+      place: best.place,
+      alongMeters: best.alongMeters,
       meal: mealId,
-      reason: `${window.label} near ${clock} · ${formatDistanceShort(onRoute.alongMeters)} into the trip`,
+      reason: `${window.label} near ${clock} · ${formatDistanceShort(best.alongMeters)} into the trip`,
     });
   }
 
-  return suggestions;
+  if (suggestions.length === 0 && searchError) throw searchError;
+  if (mealsDuringTrip === 0) {
+    return {
+      suggestions,
+      note: 'None of the chosen meal times fall during this trip — change the departure time or meals',
+    };
+  }
+  return {
+    suggestions,
+    note:
+      missed.length > 0
+        ? `No places to eat found on the route around ${missed.join(' or ')} time`
+        : undefined,
+  };
 }
 
 function mealTargetDuringTrip(
@@ -274,24 +371,36 @@ function mealTargetDuringTrip(
   return candidates[0]!;
 }
 
-function pickBestAlongRoute(
+/**
+ * Lowest score wins: metres off the route, plus `positionPenalty` for where
+ * along the trip it sits, plus a little for places with no name.
+ */
+function pickBest(
   hits: PlaceHit[],
-  route: Coordinate[],
+  stretch: Array<{ coordinate: Coordinate; alongMeters: number }>,
   used: Set<string>,
-): PlaceHit | null {
-  let best: PlaceHit | null = null;
+  positionPenalty: (alongMeters: number) => number,
+): { place: PlaceHit; alongMeters: number } | null {
+  if (stretch.length < 2) return null;
+  const line = stretch.map((p) => p.coordinate);
+  const startM = stretch[0]!.alongMeters;
+
+  let best: { place: PlaceHit; alongMeters: number } | null = null;
   let bestScore = Infinity;
   for (const hit of hits) {
-    const key = placeKey(hit);
-    if (used.has(key)) continue;
-    const off = distanceAlongPolylineMeters(
-      hit.coordinate,
-      route,
-    ).distanceToRouteMeters;
-    const score = off + (hit.distanceMeters ?? 0) * 0.15;
+    if (used.has(placeKey(hit))) continue;
+    const projection = distanceAlongPolylineMeters(hit.coordinate, line);
+    const alongMeters = startM + projection.alongMeters;
+    const score =
+      projection.distanceToRouteMeters +
+      positionPenalty(alongMeters) +
+      (isGenericName(hit.name) ? 500 : 0);
     if (score < bestScore) {
       bestScore = score;
-      best = { ...hit, distanceMeters: off };
+      best = {
+        place: { ...hit, distanceMeters: projection.distanceToRouteMeters },
+        alongMeters,
+      };
     }
   }
   return best;

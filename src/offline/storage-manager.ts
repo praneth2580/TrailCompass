@@ -59,6 +59,8 @@ export class StorageManager {
       data,
       directory: Directory.Data,
       encoding: Encoding.UTF8,
+      // Without this, writes into a missing subfolder (road-packs/) fail.
+      recursive: true,
     });
     const { uri } = await Filesystem.getUri({
       path,

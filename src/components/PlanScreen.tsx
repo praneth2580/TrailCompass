@@ -24,6 +24,8 @@ interface PlanScreenProps {
   activeRoute: CalculatedRoute | null;
   engineReady: boolean;
   planning: boolean;
+  /** The trip was edited after activeRoute was planned. */
+  routeOutdated: boolean;
   onPreview: () => void;
   /** Plan the itinerary without leaving Plan; throws on routing errors. */
   onPlanInPlace: () => Promise<CalculatedRoute | null>;
@@ -38,6 +40,7 @@ export function PlanScreen({
   activeRoute,
   engineReady,
   planning,
+  routeOutdated,
   onPreview,
   onPlanInPlace,
   onStart,
@@ -57,6 +60,7 @@ export function PlanScreen({
   const canPreview = Boolean(destination) && engineReady;
   const hasRoute =
     Boolean(activeRoute) &&
+    !routeOutdated &&
     (nav.status === 'choosing' ||
       nav.status === 'navigating' ||
       nav.status === 'rerouting');
@@ -191,6 +195,10 @@ export function PlanScreen({
             {nav.status === 'planning'
               ? (nav.progress?.label ?? nav.message ?? 'Planning route…')
               : 'Getting GPS…'}
+          </p>
+        ) : routeOutdated ? (
+          <p className="tc-plan-summary-line">
+            Trip changed — preview again to update the route
           </p>
         ) : summaryRoute ? (
           <p className="tc-plan-summary-line">

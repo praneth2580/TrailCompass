@@ -6,6 +6,7 @@ import {
   suggestRouteName,
 } from '../routing/route-naming';
 import type { RoutingProfileId } from '../routing/routing-profiles';
+import { useBackHandler } from '../hooks/useBackHandler';
 
 export type SaveShareMode = 'save' | 'share';
 
@@ -54,6 +55,8 @@ export function SaveShareRouteSheet({
     }, 40);
     return () => window.clearTimeout(id);
   }, [open, openKey, route]);
+
+  useBackHandler(open && route != null, onClose);
 
   if (!open || !route) return null;
 

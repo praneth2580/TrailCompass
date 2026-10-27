@@ -1,0 +1,104 @@
+# Publishes the fuel and food places the app downloads, so riders get fresh
+# data without a new APK. Overture Maps publishes about once a month; this
+# checks weekly and rebuilds only when there is a new release.
+#
+# Site layout (the app reads it in src/services/poi-data.service.ts):
+#   poi/manifest.json            the latest release, and its tile lists
+#   poi/<release>/<kind>/*.json  that release's tiles
+#
+# One-time setup: Settings → Pages → Build and deployment → Source: GitHub Actions.
+name: Publish POI data
+
+on:
+  schedule:
+    - cron: '23 4 * * 1' # Mondays 04:23 UTC
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Rebuild even if the published data is already on the latest Overture release
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: poi-data
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      publish: ${{ steps.check.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Compare Overture's latest release with the published data
+        id: check
+        env:
+          FORCE: ${{ inputs.force }}
+        run: |
+          latest=$(curl -fsSL --retry 3 https://stac.overturemaps.org/catalog.json | jq -r .latest)
+          if [[ ! "$latest" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$ ]]; then
+            echo "::error::Unexpected Overture release name: $latest"
+            exit 1
+          fi
+
+          # The published manifest is the baseline for the drop check; before
+          # the first publish, the copy bundled in the app.
+          site="https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}"
+          if curl -fsSL --retry 3 "$site/poi/manifest.json" -o "$RUNNER_TEMP/previous.json"; then
+            published=$(jq -r '.release // ""' "$RUNNER_TEMP/previous.json")
+          else
+            cp public/assets/poi/manifest.json "$RUNNER_TEMP/previous.json"
+            published=""
+          fi
+          echo "Overture latest: $latest; published: ${published:-nothing yet}"
+
+          publish=true
+          if [[ "$latest" == "$published" && "$FORCE" != "true" ]]; then
+            echo "The published data is already on $latest."
+            publish=false
+          fi
+          {
+            echo "release=$latest"
+            echo "publish=$publish"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build tiles
+        if: steps.check.outputs.publish == 'true'
+        env:
+          RELEASE: ${{ steps.check.outputs.release }}
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet duckdb==1.5.6
+          "$RUNNER_TEMP/venv/bin/python" scripts/build-poi-tiles.py \
+            --release "$RELEASE" \
+            --out "_site/poi/$RELEASE" \
+            --previous "$RUNNER_TEMP/previous.json"
+          cp "_site/poi/$RELEASE/manifest.json" _site/poi/manifest.json
+          cp public/assets/poi/README.md _site/poi/README.md
+          echo '<!doctype html><meta charset="utf-8"><title>TrailCompass data</title><p>Fuel and food places for the TrailCompass app: <a href="poi/manifest.json">poi/manifest.json</a>, <a href="poi/README.md">sources and licences</a>.</p>' > _site/index.html
+
+      - name: Upload the site
+        if: steps.check.outputs.publish == 'true'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    if: needs.build.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publish to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

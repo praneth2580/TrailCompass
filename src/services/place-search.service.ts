@@ -1,31 +1,7 @@
 import type { Coordinate } from '../routing/routing-adapter';
 import { haversineMeters } from '../routing/geo';
 import type { PlaceHit } from '../types/trip-stop';
-
-const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
-/** Nominatim's usage policy allows at most one request per second. */
-const NOMINATIM_MIN_INTERVAL_MS = 1_000;
-
-let nextRequestAt = 0;
-
-async function waitForNominatimSlot(): Promise<void> {
-  const now = Date.now();
-  const waitMs = Math.max(0, nextRequestAt - now);
-  nextRequestAt = Math.max(now, nextRequestAt) + NOMINATIM_MIN_INTERVAL_MS;
-  if (waitMs > 0) {
-    await new Promise((resolve) => setTimeout(resolve, waitMs));
-  }
-}
-
-interface NominatimResult {
-  place_id: number;
-  display_name: string;
-  lat: string;
-  lon: string;
-  name?: string;
-  type?: string;
-  class?: string;
-}
+import { nominatimSearch } from './nominatim-client';
 
 /**
  * Geocode a free-text place query via Nominatim (OSM).
@@ -39,28 +15,23 @@ export async function searchPlaces(
   const trimmed = query.trim();
   if (trimmed.length < 2) return [];
 
-  const params = new URLSearchParams({
+  const params: Record<string, string> = {
     q: trimmed,
-    format: 'jsonv2',
     addressdetails: '0',
     limit: String(limit),
-  });
+  };
   if (near) {
-    params.set('viewbox', viewboxAround(near, 0.6));
-    params.set('bounded', '0');
+    params.viewbox = viewboxAround(near, 0.6);
+    params.bounded = '0';
   }
 
-  await waitForNominatimSlot();
-  const response = await fetch(`${NOMINATIM_URL}?${params}`, {
-    headers: {
-      Accept: 'application/json',
-    },
-  });
-  if (!response.ok) {
-    throw new Error(`Place search failed (${response.status})`);
+  let data;
+  try {
+    data = await nominatimSearch(params);
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : 'network error';
+    throw new Error(`Place search failed (${detail})`);
   }
-
-  const data = (await response.json()) as NominatimResult[];
   const hits: PlaceHit[] = data.map((row) => {
     const coordinate: Coordinate = [Number(row.lon), Number(row.lat)];
     const name =

@@ -2,6 +2,7 @@ import { useEffect, useId, useState } from 'react';
 import type { Coordinate } from '../routing/routing-adapter';
 import { findPois } from '../services/poi-search.service';
 import { formatDistanceShort } from '../routing/route-naming';
+import { useBackHandler } from '../hooks/useBackHandler';
 import {
   createTripStop,
   formatCoordShort,
@@ -50,6 +51,7 @@ export function PoiFinderSheet({
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
+    const abort = new AbortController();
 
     void (async () => {
       // Defer busy flag so the effect itself stays free of sync setState.
@@ -65,6 +67,7 @@ export function PoiFinderSheet({
           route: scope === 'along' ? route : null,
           radiusMeters: scope === 'along' ? 2_000 : 3_500,
           limit: 24,
+          signal: abort.signal,
         });
         if (cancelled) return;
         setHits(results);
@@ -85,8 +88,12 @@ export function PoiFinderSheet({
 
     return () => {
       cancelled = true;
+      // Free the shared Overpass / Nominatim queue for the next search.
+      abort.abort();
     };
   }, [open, kind, scope, near, route]);
+
+  useBackHandler(open, onClose);
 
   if (!open) return null;
 
@@ -159,7 +166,9 @@ export function PoiFinderSheet({
 
         <div className="tc-plan-hit-list" role="listbox" aria-label="Places">
           {busy ? (
-            <p className="tc-plan-hit-empty">Looking up OpenStreetMap…</p>
+            <p className="tc-plan-hit-empty">
+              {kind === 'fuel' ? 'Finding stations…' : 'Finding places to eat…'}
+            </p>
           ) : error && hits.length === 0 ? (
             <p className="tc-plan-hit-empty">{error}</p>
           ) : (
@@ -186,6 +195,10 @@ export function PoiFinderSheet({
             ))
           )}
         </div>
+
+        <p className="tc-sheet-hint">
+          Places: Overture Maps Foundation · © OpenStreetMap contributors
+        </p>
 
         <div className="tc-sheet-actions tc-sheet-actions-single">
           <button

@@ -7,6 +7,8 @@ interface NavigationBannerProps {
   navMode?: boolean;
   rideMode?: boolean;
   canSaveRoute?: boolean;
+  /** The trip was edited after this route was planned. */
+  routeOutdated?: boolean;
   onPlan?: () => void;
   onStart?: () => void;
   onStop?: () => void;
@@ -21,6 +23,7 @@ export function NavigationBanner({
   navMode = false,
   rideMode = false,
   canSaveRoute = false,
+  routeOutdated = false,
   onPlan,
   onStart,
   onStop,
@@ -33,10 +36,12 @@ export function NavigationBanner({
     state.distanceToNextManeuverMeters,
   );
   const choosing = state.status === 'choosing';
+  const outdated = choosing && routeOutdated;
   const showPlan =
     state.status === 'idle' ||
     state.status === 'error' ||
-    state.status === 'arrived';
+    state.status === 'arrived' ||
+    outdated;
   const progress = state.progress;
   const working =
     (state.status === 'planning' || state.status === 'rerouting') &&
@@ -52,7 +57,9 @@ export function NavigationBanner({
     ? progress.label || state.message || 'Working…'
     : navMode || rideMode
       ? text
-      : (state.message ?? text);
+      : outdated
+        ? 'Trip changed — plan again to update the route'
+        : (state.message ?? text);
 
   const bannerClass = showPlan
     ? 'tc-nav-banner tc-nav-banner-idle'
@@ -102,7 +109,7 @@ export function NavigationBanner({
           </div>
         </div>
         {state.offRoute ? <p className="tc-nav-offroute">Off route</p> : null}
-        {(choosing || navMode || state.status === 'rerouting') &&
+        {((choosing && !outdated) || navMode || state.status === 'rerouting') &&
         state.remainingDistanceMeters != null ? (
           <p className="tc-nav-remaining">
             {formatRemaining(state.remainingDistanceMeters)}

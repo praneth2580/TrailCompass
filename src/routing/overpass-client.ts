@@ -19,12 +19,17 @@ const DEFAULT_CLIENT_TIMEOUT_MS = 120_000;
  */
 export async function fetchOverpass<T>(
   query: string,
-  options: { onProgress?: RoutingProgressListener; signal?: AbortSignal } = {},
+  options: {
+    onProgress?: RoutingProgressListener;
+    signal?: AbortSignal;
+    /** Interactive lookups pass fewer tries so a fallback can take over sooner. */
+    maxAttempts?: number;
+  } = {},
 ): Promise<{ elements?: T[] }> {
   const { onProgress, signal } = options;
   let lastError: Error | undefined;
   let mirror = 0;
-  const maxAttempts = OVERPASS_ENDPOINTS.length * 2;
+  const maxAttempts = options.maxAttempts ?? OVERPASS_ENDPOINTS.length * 2;
   const timeoutMs = clientTimeoutMs(query);
 
   for (let attemptIndex = 0; attemptIndex < maxAttempts; attemptIndex++) {
@@ -64,14 +69,23 @@ export async function fetchOverpass<T>(
         backoffMs = backoffDelayMs(attemptIndex);
       } else {
         const text = await readResponseText(response, onProgress);
+        let parsed: { elements?: T[]; remark?: string } | null = null;
         try {
-          const parsed = JSON.parse(text) as { elements?: T[] };
-          overpassScheduler.noteSuccess(performance.now() - started);
-          return parsed;
+          parsed = JSON.parse(text) as { elements?: T[]; remark?: string };
         } catch {
           lastError = new Error('Overpass returned invalid JSON');
           mirror += 1;
           backoffMs = backoffDelayMs(attemptIndex);
+        }
+        if (parsed && isRuntimeErrorRemark(parsed.remark)) {
+          // HTTP 200 with a cut-off element list: never hand it on to be cached.
+          overpassScheduler.noteSaturated();
+          lastError = new Error(`Overpass ${parsed.remark!.trim()}`);
+          mirror += 1;
+          backoffMs = backoffDelayMs(attemptIndex);
+        } else if (parsed) {
+          overpassScheduler.noteSuccess(performance.now() - started);
+          return parsed;
         }
       }
     } catch (e) {
@@ -91,7 +105,7 @@ export async function fetchOverpass<T>(
       release();
     }
 
-    await sleep(backoffMs, signal);
+    if (attemptIndex < maxAttempts - 1) await sleep(backoffMs, signal);
   }
 
   throw lastError ?? new Error('Overpass request failed');
@@ -103,6 +117,14 @@ function clientTimeoutMs(query: string): number {
   return match
     ? Number(match[1]) * 1_000 + CLIENT_TIMEOUT_GRACE_MS
     : DEFAULT_CLIENT_TIMEOUT_MS;
+}
+
+/**
+ * Overpass reports a timeout or out-of-memory as HTTP 200 with a
+ * "runtime error: …" remark and whatever elements it had gathered so far.
+ */
+export function isRuntimeErrorRemark(remark: unknown): boolean {
+  return typeof remark === 'string' && /runtime error/i.test(remark);
 }
 
 function isSaturatedStatus(status: number): boolean {

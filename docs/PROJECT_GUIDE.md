@@ -69,7 +69,7 @@ TrailCompass is an Android navigation app for motorcycle touring. It is a React 
 | Build | Vite 8 | `base: './'` so asset paths resolve inside the Android WebView. Source maps are on. |
 | Lint | oxlint | `.oxlintrc.json`: react, typescript and oxc plugins; rules-of-hooks is an error. |
 | Tests | Vitest 4 | Unit tests for the routing code, next to it as `src/routing/*.test.ts`. Node environment. |
-| Native shell | Capacitor 7 | Plugins: Geolocation, Filesystem, Preferences, Share. |
+| Native shell | Capacitor 7 | Plugins: Geolocation, Filesystem, Preferences, Share, App (back button), Keep Awake, Text-to-Speech. |
 | Map | MapLibre GL JS 6 | Vector style from OpenFreeMap. The worker URL is set explicitly for Vite. |
 | Tiles (future) | `pmtiles` 4 | Installed, but not used yet. |
 | Routing (optional) | `@jansoft/mbujkanji-valhalla-wasm` | Loaded with a dynamic import, only if tiles exist. |
@@ -101,12 +101,13 @@ trailcompass/
 │   ├── routing/                Routing engine, OSM loader, geometry, file format
 │   ├── database/               JSON key-value repositories on Capacitor Preferences
 │   ├── offline/                Map-package plumbing (mostly stubs)
-│   ├── hooks/                  useRideFullscreen
+│   ├── hooks/                  useRideFullscreen, useKeepAwake, useBackHandler
 │   └── types/                  Shared domain types
 │
 ├── public/
 │   ├── assets/map-styles/      Online style descriptor + README
 │   ├── assets/routing/         demo-network.geojson (Paris Trocadéro) + README
+│   ├── assets/poi/             Bundled Overture fuel + food tiles for India + README
 │   └── favicon / icons
 │
 ├── resources/                  Master icon (png/svg) for tooling
@@ -910,7 +911,8 @@ Turns on an immersive map view automatically once the bike is clearly moving dur
 | UI fonts | First load (falls back to system fonts) | Google Fonts |
 | Road data for routing | **Yes, unless** the area is in the memory cache or a road pack, or Valhalla tiles are bundled | Overpass (2 mirrors) |
 | Place search | Yes | Nominatim |
-| Fuel and food POIs, stop suggestions | Yes | Overpass |
+| Fuel and food POIs, stop suggestions | No for India (bundled Overture tiles); live results added where those are few | Nominatim, then Overpass |
+| Fuel and food data updates | Optional; checked daily, the app keeps working on its current copy | GitHub Pages |
 | GPS position and compass | No | Device |
 | A\* routing on cached roads, follow loop, arrival | No | On the phone |
 | Rerouting | Only if the new corridor is not cached | Overpass |
@@ -940,6 +942,21 @@ So today the app runs routing on the phone, but it is **not** a fully offline ap
 
 These came up while reading the code for this guide. Each one points to the relevant code. Nothing here has been confirmed on a device.
 
+### Fixed on 2026-10-27
+
+- **Road packs are saved on Android.** `storage-manager.ts` now writes with `recursive: true`; before, writes into the missing `road-packs/` folder failed silently.
+- **Overpass replies with a `runtime error` remark** (HTTP 200 with a cut-off element list) are treated as a failure and retried on the next mirror instead of being cached (`overpass-client.ts`).
+- **The screen stays on while navigating** (`hooks/useKeepAwake.ts`).
+- **Start no longer follows an out-of-date route.** If stops or the destination change after planning, Start is replaced by Plan / Preview again (`NavigationService.isPlannedFor`).
+- **`ensureFix` waits for a fresh GPS fix** instead of throwing when the last fix is over 60 s old.
+- **The Android back button** closes the open sheet, then map-pick or ride view, then returns to the Map tab. During navigation, leaving the app needs a second press (`hooks/useBackHandler.ts`, `App.tsx`).
+- **Spoken turn prompts** for a helmet headset, with an on/off toggle in Route options (`voice-guidance.service.ts`).
+- **Fuel and food suggestions work again.** OSM maps few pumps and eateries along Indian highways, and the public Overpass servers often answer 504. The app now ships Overture Maps places for India in 1° tiles (`bundled-pois.service.ts`, built by `npm run data:poi`) and adds live OSM results only where those are few. Small areas use Nominatim; long stretches use one Overpass query (`poi-search.service.ts`). Fuel is searched over the last part of each tank leg, and each leg starts from the pump picked. A trip that fits in one tank says so instead of "no stations" (`stop-suggest.service.ts`).
+- **Fuel and food data updates itself without a new APK.** A weekly workflow (`.github/workflows/poi-data.yml`) publishes each new Overture release on GitHub Pages. The app downloads it about once a day when online (`poi-data.service.ts`), and the Offline tab shows the version in use. One-time setup: Settings → Pages → Source: GitHub Actions. See `public/assets/poi/README.md`.
+- **Dismissing the share sheet** no longer opens it a second time or shows an error.
+- **The map stays mounted across tabs**, so it no longer reloads or loses its camera.
+- **`npm test` skips `*.scratch.test.ts`** (live OSM requests). Run them with `LIVE_OSM=1 npm test`.
+
 ### Fixed on 2026-10-23
 
 Each fix below is covered by tests in `src/routing/*.test.ts` (`npm test`).
@@ -964,6 +981,7 @@ Each fix below is covered by tests in `src/routing/*.test.ts` (`npm test`).
 6. **`release.mjs` needs `android/app/src/main/res/xml/config.xml`, which is gitignored.** It exists only after a `cap sync`, so a fresh clone fails at the version-bump step. The script also supports a token embedded in the `origin` URL, which means storing a credential in `.git/config`.
 7. **Placeholder app ID** `com.example.trailcompass` (see §16.1), and releases ship a debug APK.
 8. **README is out of date** (milestones, repository layout, "no routing yet").
+9. **`npm install <package>` fails with ERESOLVE.** `@jansoft/mbujkanji-valhalla-wasm` depends on `@vitest/browser-*@latest`, which wants a different `vitest` than the project's. Adding a package currently needs `--legacy-peer-deps`.
 
 ---
 
@@ -979,7 +997,7 @@ npm run dev
 # Type-check + build, lint, unit tests (Vitest)
 npm run build
 npm run lint
-npm test
+npm test               # LIVE_OSM=1 npm test also runs the live OSM scratch tests
 
 # Android: build, sync, assemble, install, launch (JDK 21 + Android SDK required)
 npm run cap:run

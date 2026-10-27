@@ -86,6 +86,8 @@ export class MapLibreAdapter implements MapAdapter {
   private cameraBreakListeners = new Set<() => void>();
   private statusListeners = new Set<(status: MapDataStatus) => void>();
   private followCamera = true;
+  /** False while another tab covers the (still mounted) map. */
+  private visible = true;
   private status: MapDataStatus = {
     ok: false,
     message: 'Loading online map…',
@@ -200,6 +202,16 @@ export class MapLibreAdapter implements MapAdapter {
     this.followCamera = follow;
   }
 
+  /**
+   * The map stays mounted behind other tabs so it does not reload. While
+   * hidden, GPS fixes move the marker but do not animate the camera.
+   */
+  setVisible(visible: boolean): void {
+    if (this.visible === visible) return;
+    this.visible = visible;
+    if (visible) this.map?.resize();
+  }
+
   private breakCameraFollow(): void {
     if (!this.followCamera) return;
     this.followCamera = false;
@@ -302,6 +314,7 @@ export class MapLibreAdapter implements MapAdapter {
     const lngLat: [number, number] = [coordinate[0], coordinate[1]];
     this.ensurePositionMarker(lngLat);
     this.applyPositionMarkerChrome(headingDegrees);
+    if (!this.visible) return;
 
     const follow = options?.follow ?? this.followCamera;
     const firstFix = !this.framedToPosition;

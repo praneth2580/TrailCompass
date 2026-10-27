@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { App as CapacitorApp } from '@capacitor/app';
 import { MapView } from '../components/MapView';
 import { CompassWidget } from '../components/CompassWidget';
 import { NavigationBanner } from '../components/NavigationBanner';
@@ -24,6 +25,8 @@ import { compassService } from '../services/compass.service';
 import { navigationService } from '../services/navigation.service';
 import { mapService } from '../services/map.service';
 import { routeLibrary } from '../services/route-library.service';
+import { voiceGuidance } from '../services/voice-guidance.service';
+import { checkForPoiUpdate } from '../services/poi-data.service';
 import {
   tripPlanner,
   type TripPlannerState,
@@ -40,7 +43,14 @@ import {
   setBrowserFullscreen,
   useRideFullscreen,
 } from '../hooks/useRideFullscreen';
+import { useKeepAwake } from '../hooks/useKeepAwake';
+import { handleOverlayBack } from '../hooks/useBackHandler';
 import { APP_ROUTES, type AppScreen } from './routes';
+
+/** A second back press within this window leaves the app mid-navigation. */
+const BACK_EXIT_WINDOW_MS = 2_500;
+/** Let start-up finish before looking for newer fuel and food data. */
+const POI_UPDATE_DELAY_MS = 10_000;
 
 export default function App() {
   const [screen, setScreen] = useState<AppScreen>('map');
@@ -68,9 +78,12 @@ export default function App() {
   const [allowExpressways, setAllowExpressways] = useState(() =>
     navigationService.getAllowExpressways(),
   );
+  const [voiceOn, setVoiceOn] = useState(() => voiceGuidance.isEnabled());
   const previewToken = useRef(0);
   const planTripKey = useRef<string | null>(null);
   const screenRef = useRef<AppScreen>(screen);
+  const handleBackRef = useRef<() => void>(() => {});
+  const lastBackAt = useRef(0);
 
   const { rideMode, dismissRideMode } = useRideFullscreen({
     status: nav.status,
@@ -79,8 +92,16 @@ export default function App() {
 
   const navMode =
     nav.status === 'navigating' || nav.status === 'rerouting';
+  useKeepAwake(navMode);
   const immersive = navMode || rideMode;
   const mapPickActive = itinerary.mapPick != null;
+  // Stops or destination edited after the route was planned.
+  const routeOutdated =
+    nav.status === 'choosing' &&
+    !navigationService.isPlannedFor(
+      itinerary.destination?.coordinate ?? nav.destination ?? null,
+      itinerary.stops.map((stop) => stop.coordinate),
+    );
   const canSaveRoute =
     ((nav.alternatives?.length ?? 0) > 0 || nav.status === 'navigating') &&
     (nav.status === 'choosing' ||
@@ -94,6 +115,9 @@ export default function App() {
     });
     const unsubCompass = compassService.subscribe(setCompass);
     const unsubNav = navigationService.subscribe(setNav);
+    const unsubVoice = navigationService.subscribe((state) =>
+      voiceGuidance.update(state, locationService.getLastFix()?.speedMps ?? null),
+    );
     const unsubEngine = offlineRoutingAdapter.subscribe(setEngine);
     const unsubTrip = tripPlanner.subscribe(setItinerary);
     const unsubMap = mapService.subscribeStatus((status) => {
@@ -115,15 +139,27 @@ export default function App() {
     void navigationService.ensureEngine();
 
     const tick = window.setInterval(() => setNow(Date.now()), 2000);
+    // At most once a day; downloads quietly in the background.
+    const poiUpdate = window.setTimeout(
+      () => void checkForPoiUpdate(),
+      POI_UPDATE_DELAY_MS,
+    );
+    // Registering a listener replaces Android's default (leave the app).
+    const backListener = CapacitorApp.addListener('backButton', () =>
+      handleBackRef.current(),
+    );
 
     return () => {
       unsubLoc();
       unsubCompass();
       unsubNav();
+      unsubVoice();
+      void backListener.then((listener) => listener.remove());
       unsubEngine();
       unsubTrip();
       unsubMap();
       window.clearInterval(tick);
+      window.clearTimeout(poiUpdate);
       void locationService.stopWatching();
       compassService.stop();
     };
@@ -363,6 +399,13 @@ export default function App() {
   };
 
   const handleStartNavigation = (index?: number) => {
+    if (routeOutdated) {
+      setToast({
+        message: 'Trip changed — plan the route again first',
+        tone: 'error',
+      });
+      return;
+    }
     navigationService.startNavigation(index);
     setFollowGps(true);
     if (fix) {
@@ -436,6 +479,50 @@ export default function App() {
     navigationService.stop();
   };
 
+  const handleVoiceGuidanceChange = (enabled: boolean) => {
+    voiceGuidance.setEnabled(enabled);
+    setVoiceOn(enabled);
+  };
+
+  /**
+   * Android back: close the open sheet, then leave map-pick or ride view,
+   * then return to the Map tab. Mid-navigation, leaving needs a second press.
+   */
+  const handleBack = () => {
+    if (handleOverlayBack()) return;
+    if (tripPlanner.getState().mapPick) {
+      tripPlanner.cancelMapPick();
+      setScreen('plan');
+      setToast(null);
+      return;
+    }
+    if (rideMode) {
+      dismissRideMode();
+      return;
+    }
+    if (screen !== 'map') {
+      setScreen('map');
+      return;
+    }
+    if (navMode) {
+      const pressedAt = Date.now();
+      if (pressedAt - lastBackAt.current > BACK_EXIT_WINDOW_MS) {
+        lastBackAt.current = pressedAt;
+        setToast({
+          message: 'Navigation is running — press back again to leave',
+          tone: 'info',
+        });
+        return;
+      }
+    }
+    // Background rather than exit, so the trip and route survive.
+    void CapacitorApp.minimizeApp();
+  };
+
+  useEffect(() => {
+    handleBackRef.current = handleBack;
+  });
+
   const openSaveShareSheet = (mode: SaveShareMode) => {
     if (!navigationService.getActiveCalculatedRoute()) {
       setToast({ message: 'No route to save yet', tone: 'error' });
@@ -462,7 +549,15 @@ export default function App() {
         setToast({ message: 'Preparing share file…', tone: 'loading' });
         const snapshot = navigationService.buildSavedSnapshot(name);
         if (!snapshot) throw new Error('No route to share');
-        await routeLibrary.exportAndShare(snapshot, 'trailcompass');
+        const shared = await routeLibrary.exportAndShare(
+          snapshot,
+          'trailcompass',
+        );
+        if (!shared) {
+          // Dismissed the system share sheet: stay on ours, no error.
+          setToast(null);
+          return;
+        }
         setSheetMode(null);
         setToast({
           message: `Ready to share “${snapshot.name}”`,
@@ -502,183 +597,192 @@ export default function App() {
       data-ride={rideMode ? 'true' : undefined}
       data-map-pick={mapPickActive ? 'true' : undefined}
     >
-      {screen === 'map' ? (
-        <main className="tc-main tc-main-map">
-          <MapView
-            fix={fix}
-            followGps={followGps}
-            navigating={navMode}
-            onMapClick={handleMapClick}
-            onFollowBreak={() => setFollowGps(false)}
-            onRoutePick={(index) => {
-              if (navMode) return;
-              navigationService.selectAlternative(index);
-            }}
-          />
+      {/* Always mounted so switching tabs does not reload the map. */}
+      <main
+        className="tc-main tc-main-map"
+        data-hidden={screen !== 'map' ? 'true' : undefined}
+        inert={screen !== 'map'}
+      >
+        <MapView
+          fix={fix}
+          visible={screen === 'map'}
+          followGps={followGps}
+          navigating={navMode}
+          onMapClick={handleMapClick}
+          onFollowBreak={() => setFollowGps(false)}
+          onRoutePick={(index) => {
+            if (navMode) return;
+            navigationService.selectAlternative(index);
+          }}
+        />
 
-          {mapPickActive ? (
-            <div className="tc-map-pick-banner" role="status">
-              <p>Tap once to place your stop</p>
-              <button
-                type="button"
-                className="tc-btn tc-btn-secondary"
-                onClick={() => {
-                  tripPlanner.cancelMapPick();
-                  setScreen('plan');
-                  setToast(null);
-                }}
-              >
-                Cancel
-              </button>
-            </div>
-          ) : null}
-
-          {navMode && !followGps ? (
+        {mapPickActive ? (
+          <div className="tc-map-pick-banner" role="status">
+            <p>Tap once to place your stop</p>
             <button
               type="button"
-              className="tc-recenter-btn"
-              onClick={handleRecenterNavigation}
-              disabled={!fix}
-              aria-label="Recenter on my location"
+              className="tc-btn tc-btn-secondary"
+              onClick={() => {
+                tripPlanner.cancelMapPick();
+                setScreen('plan');
+                setToast(null);
+              }}
             >
-              <svg
-                viewBox="0 0 24 24"
-                width="20"
-                height="20"
-                fill="none"
-                aria-hidden
-              >
-                <path
-                  d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                />
-                <circle
-                  cx="12"
-                  cy="12"
-                  r="7"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                />
-                <circle cx="12" cy="12" r="2.75" fill="currentColor" />
-              </svg>
-              <span>Recenter</span>
+              Cancel
             </button>
-          ) : !immersive ? (
-            <button
-              type="button"
-              className="tc-locate-btn"
-              onClick={handleGoToMyLocation}
-              disabled={!fix}
-              aria-label="Go to my location"
-              title={fix ? 'Go to my location' : 'Waiting for GPS…'}
-            >
-              <svg
-                viewBox="0 0 24 24"
-                width="22"
-                height="22"
-                fill="none"
-                aria-hidden
-              >
-                <path
-                  d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                />
-                <circle
-                  cx="12"
-                  cy="12"
-                  r="7"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                />
-                <circle cx="12" cy="12" r="2.75" fill="currentColor" />
-              </svg>
-            </button>
-          ) : null}
+          </div>
+        ) : null}
 
-          <aside className="tc-hud" aria-label="Status">
-            <div
-              className={`tc-gps-chip tc-gps-chip-${gpsTone}`}
-              role="status"
-              title={locationError ?? undefined}
+        {navMode && !followGps ? (
+          <button
+            type="button"
+            className="tc-recenter-btn"
+            onClick={handleRecenterNavigation}
+            disabled={!fix}
+            aria-label="Recenter on my location"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              width="20"
+              height="20"
+              fill="none"
+              aria-hidden
             >
-              <span className="tc-gps-chip-dot" aria-hidden />
-              <span className="tc-gps-chip-label">GPS</span>
-              <span className="tc-gps-chip-value">
-                {formatGpsChipLabel(fix, locationError, { stale })}
+              <path
+                d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
+              <circle
+                cx="12"
+                cy="12"
+                r="7"
+                stroke="currentColor"
+                strokeWidth="2"
+              />
+              <circle cx="12" cy="12" r="2.75" fill="currentColor" />
+            </svg>
+            <span>Recenter</span>
+          </button>
+        ) : !immersive ? (
+          <button
+            type="button"
+            className="tc-locate-btn"
+            onClick={handleGoToMyLocation}
+            disabled={!fix}
+            aria-label="Go to my location"
+            title={fix ? 'Go to my location' : 'Waiting for GPS…'}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              width="22"
+              height="22"
+              fill="none"
+              aria-hidden
+            >
+              <path
+                d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
+              <circle
+                cx="12"
+                cy="12"
+                r="7"
+                stroke="currentColor"
+                strokeWidth="2"
+              />
+              <circle cx="12" cy="12" r="2.75" fill="currentColor" />
+            </svg>
+          </button>
+        ) : null}
+
+        <aside className="tc-hud" aria-label="Status">
+          <div
+            className={`tc-gps-chip tc-gps-chip-${gpsTone}`}
+            role="status"
+            title={locationError ?? undefined}
+          >
+            <span className="tc-gps-chip-dot" aria-hidden />
+            <span className="tc-gps-chip-label">GPS</span>
+            <span className="tc-gps-chip-value">
+              {formatGpsChipLabel(fix, locationError, { stale })}
+            </span>
+            {fix?.speedMps != null && fix.speedMps >= 0 ? (
+              <span className="tc-gps-chip-speed">
+                {formatSpeedKmh(fix.speedMps)}
               </span>
-              {fix?.speedMps != null && fix.speedMps >= 0 ? (
-                <span className="tc-gps-chip-speed">
-                  {formatSpeedKmh(fix.speedMps)}
-                </span>
-              ) : null}
-            </div>
-            <CompassWidget
-              reading={compass}
-              onEnable={() => void compassService.start()}
-            />
-          </aside>
-
-          {!mapPickActive ? (
-            <div className="tc-map-dock">
-              <RouteOptionsPanel
-                visible={showRouteOptions}
-                profile={nav.profile ?? 'fastest'}
-                alternatives={nav.alternatives ?? []}
-                selectedIndex={nav.selectedAlternativeIndex ?? 0}
-                showAllRoutes={nav.showAllRoutes === true}
-                onProfileChange={handleProfileChange}
-                allowExpressways={allowExpressways}
-                onAllowExpresswaysChange={handleAllowExpresswaysChange}
-                onSelectAlternative={(index) =>
-                  navigationService.selectAlternative(index)
-                }
-                onStartNavigation={handleStartNavigation}
-                onToggleShowAll={(showAll) =>
-                  navigationService.setShowAllRoutes(showAll)
-                }
-              />
-
-              <NavigationBanner
-                state={nav}
-                canPlan={canPlan}
-                navMode={navMode}
-                rideMode={rideMode}
-                canSaveRoute={canSaveRoute}
-                onPlan={handlePlanRoute}
-                onStart={() => handleStartNavigation()}
-                onStop={handleStop}
-                onExitRide={dismissRideMode}
-                onSaveRoute={() => openSaveShareSheet('save')}
-                onShareRoute={() => openSaveShareSheet('share')}
-              />
-            </div>
-          ) : null}
-
-          <SaveShareRouteSheet
-            open={sheetMode != null}
-            mode={sheetMode ?? 'save'}
-            route={navigationService.getActiveCalculatedRoute()}
-            profile={nav.profile}
-            busy={sheetBusy}
-            error={sheetError}
-            onClose={() => {
-              if (!sheetBusy) {
-                setSheetMode(null);
-                setSheetError(null);
-              }
-            }}
-            onConfirm={(name) => void handleSheetConfirm(name)}
+            ) : null}
+          </div>
+          <CompassWidget
+            reading={compass}
+            onEnable={() => void compassService.start()}
           />
+        </aside>
 
-          {toast ? (
-            <StatusToast message={toast.message} tone={toast.tone} />
-          ) : null}
-        </main>
-      ) : screen === 'plan' ? (
+        {!mapPickActive ? (
+          <div className="tc-map-dock">
+            <RouteOptionsPanel
+              visible={showRouteOptions}
+              profile={nav.profile ?? 'fastest'}
+              alternatives={routeOutdated ? [] : (nav.alternatives ?? [])}
+              selectedIndex={nav.selectedAlternativeIndex ?? 0}
+              showAllRoutes={nav.showAllRoutes === true}
+              onProfileChange={handleProfileChange}
+              allowExpressways={allowExpressways}
+              onAllowExpresswaysChange={handleAllowExpresswaysChange}
+              voiceGuidance={voiceOn}
+              onVoiceGuidanceChange={handleVoiceGuidanceChange}
+              onSelectAlternative={(index) =>
+                navigationService.selectAlternative(index)
+              }
+              onStartNavigation={handleStartNavigation}
+              onToggleShowAll={(showAll) =>
+                navigationService.setShowAllRoutes(showAll)
+              }
+            />
+
+            <NavigationBanner
+              state={nav}
+              canPlan={canPlan}
+              navMode={navMode}
+              rideMode={rideMode}
+              canSaveRoute={canSaveRoute}
+              routeOutdated={routeOutdated}
+              onPlan={handlePlanRoute}
+              onStart={() => handleStartNavigation()}
+              onStop={handleStop}
+              onExitRide={dismissRideMode}
+              onSaveRoute={() => openSaveShareSheet('save')}
+              onShareRoute={() => openSaveShareSheet('share')}
+            />
+          </div>
+        ) : null}
+
+        <SaveShareRouteSheet
+          open={sheetMode != null}
+          mode={sheetMode ?? 'save'}
+          route={navigationService.getActiveCalculatedRoute()}
+          profile={nav.profile}
+          busy={sheetBusy}
+          error={sheetError}
+          onClose={() => {
+            if (!sheetBusy) {
+              setSheetMode(null);
+              setSheetError(null);
+            }
+          }}
+          onConfirm={(name) => void handleSheetConfirm(name)}
+        />
+
+        {toast && screen === 'map' ? (
+          <StatusToast message={toast.message} tone={toast.tone} />
+        ) : null}
+      </main>
+
+      {screen === 'plan' ? (
         <div className="tc-plan-shell">
           <PlanScreen
             gpsCoordinate={gpsCoordinate}
@@ -686,6 +790,7 @@ export default function App() {
             activeRoute={navigationService.getActiveCalculatedRoute()}
             engineReady={engine.ready}
             planning={planBusy || nav.status === 'planning'}
+            routeOutdated={routeOutdated}
             onPreview={handlePreviewFromPlan}
             onPlanInPlace={() => planTripFromItinerary({ showMap: false })}
             onStart={() => {
@@ -709,9 +814,9 @@ export default function App() {
             <StatusToast message={toast.message} tone={toast.tone} />
           ) : null}
         </div>
-      ) : (
+      ) : screen === 'downloads' ? (
         <OfflineScreen engine={engine} />
-      )}
+      ) : null}
 
       <nav className="tc-bottom-nav" aria-label="Main">
         {APP_ROUTES.map((route) => (

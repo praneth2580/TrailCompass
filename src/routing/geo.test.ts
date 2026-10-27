@@ -3,8 +3,10 @@ import type { Coordinate } from './routing-adapter';
 import {
   distanceAlongPolylineMeters,
   haversineMeters,
+  polylineLengthMeters,
   projectOntoPolyline,
   remainingFromProjectionMeters,
+  samplePolylineMeters,
 } from './geo';
 
 const LAT = 48.86;
@@ -74,5 +76,29 @@ describe('remainingFromProjectionMeters', () => {
       1700,
       -1,
     );
+  });
+});
+
+describe('samplePolylineMeters', () => {
+  // About 106 km along the 18°N parallel.
+  const line: Coordinate[] = [
+    [73, 18],
+    [74, 18],
+  ];
+
+  it('samples every step between the bounds, both ends included', () => {
+    const samples = samplePolylineMeters(line, 10_000, 40_000, 10_000);
+    expect(samples.map((s) => Math.round(s.alongMeters))).toEqual([
+      10_000, 20_000, 30_000, 40_000,
+    ]);
+    expect(samples[1]!.coordinate[0]).toBeCloseTo(73 + 20_000 / polylineLengthMeters(line), 6);
+  });
+
+  it('clamps the bounds to the route', () => {
+    const total = polylineLengthMeters(line);
+    const samples = samplePolylineMeters(line, -5_000, total + 5_000, 50_000);
+    expect(samples[0]!.alongMeters).toBe(0);
+    expect(samples[samples.length - 1]!.alongMeters).toBeCloseTo(total, 3);
+    expect(samples[samples.length - 1]!.coordinate).toEqual([74, 18]);
   });
 });

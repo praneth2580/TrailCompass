@@ -4,6 +4,15 @@ import {
   roadPackService,
   type RoadPackMeta,
 } from '../services/road-pack.service';
+import {
+  checkForPoiUpdate,
+  currentPoiData,
+  lastPoiCheckAt,
+  onPoiDataChanged,
+  subscribePoiUpdates,
+  type PoiManifest,
+  type PoiUpdateStatus,
+} from '../services/poi-data.service';
 
 interface OfflineScreenProps {
   engine: OfflineEngineStatus;
@@ -87,6 +96,8 @@ export function OfflineScreen({ engine }: OfflineScreenProps) {
           <p className="tc-section-copy">{engine.attribution}</p>
         ) : null}
       </section>
+
+      <PlacesDataSection />
 
       <div className="tc-saved-routes-header">
         <h2 className="tc-list-heading">Saved road packs</h2>
@@ -176,6 +187,102 @@ export function OfflineScreen({ engine }: OfflineScreenProps) {
       </section>
     </main>
   );
+}
+
+interface PlacesData {
+  release: string | null;
+  downloaded: boolean;
+  fuel: number;
+  food: number;
+}
+
+/** Which fuel and food data is in use, and checking GitHub for newer data. */
+function PlacesDataSection() {
+  const [data, setData] = useState<PlacesData | null>(null);
+  const [status, setStatus] = useState<PoiUpdateStatus>({ state: 'idle' });
+  const [checkedAt, setCheckedAt] = useState(() => lastPoiCheckAt());
+
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      const location = await currentPoiData();
+      const manifest = await fetch(`${location.base}/manifest.json`)
+        .then((r) => (r.ok ? (r.json() as Promise<PoiManifest>) : null))
+        .catch(() => null);
+      if (!alive) return;
+      setData({
+        release: location.release ?? manifest?.release ?? null,
+        downloaded: location.downloaded,
+        fuel: manifest?.kinds.fuel?.count ?? 0,
+        food: manifest?.kinds.food?.count ?? 0,
+      });
+    };
+    void load();
+    const offChanged = onPoiDataChanged(() => void load());
+    const offStatus = subscribePoiUpdates((next) => {
+      setStatus(next);
+      setCheckedAt(lastPoiCheckAt());
+    });
+    return () => {
+      alive = false;
+      offChanged();
+      offStatus();
+    };
+  }, []);
+
+  const busy = status.state === 'checking' || status.state === 'downloading';
+
+  return (
+    <section className="tc-storage" aria-label="Fuel and food places">
+      <div className="tc-storage-row">
+        <span className="tc-storage-label">Fuel &amp; food places</span>
+        <span className="tc-storage-value">
+          {data?.release ? `Overture ${data.release}` : '—'}
+        </span>
+      </div>
+      <p className="tc-section-copy">
+        {data
+          ? `${data.fuel.toLocaleString()} fuel stations · ${data.food.toLocaleString()} places to eat · ${data.downloaded ? 'downloaded update' : 'built into the app'}`
+          : 'Loading…'}
+      </p>
+      <p className="tc-section-copy" role="status">
+        {poiStatusText(status, checkedAt)}
+      </p>
+      <button
+        type="button"
+        className="tc-btn tc-btn-ghost"
+        disabled={busy}
+        onClick={() => void checkForPoiUpdate({ force: true })}
+      >
+        {status.state === 'downloading'
+          ? `Downloading ${status.done}/${status.total}…`
+          : status.state === 'checking'
+            ? 'Checking…'
+            : 'Check for updates'}
+      </button>
+    </section>
+  );
+}
+
+function poiStatusText(status: PoiUpdateStatus, checkedAt: number | null): string {
+  switch (status.state) {
+    case 'checking':
+      return 'Checking GitHub for newer data…';
+    case 'downloading':
+      return `Downloading Overture ${status.release}: ${status.done} of ${status.total} tiles`;
+    case 'done':
+    case 'error':
+      return status.message;
+    default:
+      return checkedAt
+        ? `Last checked ${new Date(checkedAt).toLocaleString(undefined, {
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+          })} · checks daily when online`
+        : 'Checks for newer data daily when online';
+  }
 }
 
 function formatBytes(bytes: number): string {
