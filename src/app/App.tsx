@@ -99,8 +99,6 @@ export default function App() {
   const [followGps, setFollowGps] = useState(true);
   /** Zen mode: only the map (with its route) and a large compass. */
   const [zenPhase, setZenPhase] = useState<ZenPhase>('off');
-  /** Route planning is showing its progress in a notification. */
-  const [inBackground, setInBackground] = useState(false);
   const zenMode = zenPhase === 'entering' || zenPhase === 'on';
   const [libraryTick, setLibraryTick] = useState(0);
   const [toast, setToast] = useState<{
@@ -186,9 +184,8 @@ export default function App() {
     void compassService.start();
     void navigationService.ensureEngine();
     void downloadPolicy.start();
-    const offBackground = backgroundPlanning.subscribe(() =>
-      setInBackground(backgroundPlanning.isActive()),
-    );
+    // Every route plan gets its notification with Pause and Stop.
+    const offAutoBackground = backgroundPlanning.watch();
 
     const tick = window.setInterval(() => setNow(Date.now()), 2000);
     // At most once a day; downloads quietly in the background.
@@ -215,7 +212,7 @@ export default function App() {
       unsubEngine();
       unsubTrip();
       unsubMap();
-      offBackground();
+      offAutoBackground();
       window.clearInterval(tick);
       window.clearTimeout(poiUpdate);
       window.clearTimeout(appUpdate);
@@ -534,10 +531,9 @@ export default function App() {
     mapService.centerOn([fix.longitude, fix.latitude]);
   };
 
+  // The notification is usually up already; this sends the app away.
   const canRunInBackground =
-    backgroundPlanning.isAvailable() &&
-    !inBackground &&
-    navigationService.isPlanningRoute();
+    backgroundPlanning.isAvailable() && navigationService.isPlanningRoute();
 
   /** Notification with progress, Pause and Stop; the app goes to the background. */
   const handleRunInBackground = () => {

@@ -11,9 +11,10 @@ const UPDATE_EVERY_MS = 1_000;
 type Phase = 'off' | 'running' | 'paused';
 
 /**
- * "Run in background" for route planning. A foreground service keeps the
- * app alive and shows the progress in a notification with Pause, Resume
- * and Stop; the planning itself carries on in the web view as usual.
+ * Route planning in a persistent notification. Whenever a plan starts, a
+ * foreground service shows its progress with Pause, Resume and Stop and
+ * keeps the app alive if the rider leaves it; "Run in background" then
+ * just sends the app away. The planning itself runs in the web view.
  */
 export class BackgroundPlanningService {
   private phase: Phase = 'off';
@@ -21,6 +22,8 @@ export class BackgroundPlanningService {
   private lastSentAt = 0;
   private pending: ReturnType<typeof setTimeout> | undefined;
   private listeners = new Set<() => void>();
+  /** A start() is waiting on the permission prompt or the service. */
+  private starting = false;
 
   /** The notification service is part of the Android app. */
   isAvailable(): boolean {
@@ -37,11 +40,43 @@ export class BackgroundPlanningService {
   }
 
   /**
-   * Show the notification and send the app to the background. False if
-   * planning ended first or the service could not start.
+   * Start the notification for each plan as it begins. Only while the app
+   * is on screen: Android doesn't let a background app start the service.
    */
-  async start(): Promise<boolean> {
-    if (this.phase !== 'off' || !navigationService.isPlanningRoute()) return false;
+  watch(): () => void {
+    return navigationService.subscribe(() => {
+      if (
+        this.phase === 'off' &&
+        !this.starting &&
+        this.isAvailable() &&
+        appOnScreen() &&
+        navigationService.isPlanningRoute()
+      ) {
+        void this.start({ minimize: false });
+      }
+    });
+  }
+
+  /**
+   * Show the notification (if it isn't up yet) and, unless `minimize` is
+   * false, send the app to the background. False if planning ended first
+   * or the service could not start.
+   */
+  async start({ minimize = true }: { minimize?: boolean } = {}): Promise<boolean> {
+    if (this.phase !== 'off') {
+      if (minimize) void CapacitorApp.minimizeApp();
+      return true;
+    }
+    if (this.starting || !navigationService.isPlanningRoute()) return false;
+    this.starting = true;
+    try {
+      return await this.startService(minimize);
+    } finally {
+      this.starting = false;
+    }
+  }
+
+  private async startService(minimize: boolean): Promise<boolean> {
     // Android 13+ asks once. Without permission planning still runs; only
     // the notification is hidden.
     await Downloads.requestNotifications().catch(() => undefined);
@@ -70,7 +105,7 @@ export class BackgroundPlanningService {
 
     this.cleanups.push(navigationService.subscribe((state) => this.onState(state)));
     this.emit();
-    void CapacitorApp.minimizeApp();
+    if (minimize) void CapacitorApp.minimizeApp();
     return true;
   }
 
@@ -132,7 +167,7 @@ export class BackgroundPlanningService {
           text: state.message ?? 'Open TrailCompass to try again',
         };
     // The rider is looking at the app already: it shows the result.
-    const notify = typeof document === 'undefined' || document.visibilityState !== 'visible';
+    const notify = !appOnScreen();
     void Downloads.finish({ ...notice, ok, notify }).catch(() => undefined);
     this.teardown();
   }
@@ -181,6 +216,10 @@ export class BackgroundPlanningService {
   private emit(): void {
     for (const listener of [...this.listeners]) listener();
   }
+}
+
+function appOnScreen(): boolean {
+  return typeof document !== 'undefined' && document.visibilityState === 'visible';
 }
 
 function routeSummary(state: NavigationState): string {

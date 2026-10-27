@@ -110,6 +110,35 @@ describe('BackgroundPlanningService', () => {
     expect(background.isActive()).toBe(true);
   });
 
+  it('starts the notification by itself when a plan begins on screen', async () => {
+    vi.stubGlobal('document', { visibilityState: 'visible' });
+    const background = new BackgroundPlanningService();
+    const stop = background.watch();
+    await vi.waitFor(() => expect(Downloads.startService).toHaveBeenCalledTimes(1));
+    expect(App.minimizeApp).not.toHaveBeenCalled();
+
+    // More progress doesn't start a second one.
+    nav.show(planning('Loading major roads · 3/20 areas', 15));
+    await Promise.resolve();
+    expect(Downloads.startService).toHaveBeenCalledTimes(1);
+
+    // Run in background now just leaves the app.
+    expect(await background.start()).toBe(true);
+    expect(App.minimizeApp).toHaveBeenCalledTimes(1);
+    expect(Downloads.startService).toHaveBeenCalledTimes(1);
+    stop();
+    vi.unstubAllGlobals();
+  });
+
+  it('cannot start the notification from the background', async () => {
+    vi.stubGlobal('document', { visibilityState: 'hidden' });
+    const stop = new BackgroundPlanningService().watch();
+    await Promise.resolve();
+    expect(Downloads.startService).not.toHaveBeenCalled();
+    stop();
+    vi.unstubAllGlobals();
+  });
+
   it('does nothing while GPS is still resolving', async () => {
     nav.planning = false;
     expect(await new BackgroundPlanningService().start()).toBe(false);
