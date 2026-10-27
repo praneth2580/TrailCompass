@@ -44,8 +44,29 @@ function release(tag = 'v2.1.0', overrides: Record<string, unknown> = {}) {
   };
 }
 
-function serve(body: unknown) {
-  const fetchMock = vi.fn(async () => Response.json(body));
+const SITE = 'https://praneth2580.github.io/TrailCompass/';
+
+/** The website copy (download/latest.json) as the Pages workflow writes it. */
+function siteLatest(version = '2.1.0') {
+  return {
+    version,
+    tag: `v${version}`,
+    apk: `download/trailcompass.${version}.apk`,
+    apkName: `trailcompass.${version}.apk`,
+    size: 10_122_605,
+    notes: 'Fuel fix & new dash UI',
+    releaseUrl: `https://github.com/praneth2580/TrailCompass/releases/tag/v${version}`,
+  };
+}
+
+/** GitHub's API answers with `github`; the website has no copy unless `site` is given. */
+function serve(github: unknown, site?: unknown) {
+  const fetchMock = vi.fn(async (url: string) => {
+    if (url === `${SITE}download/latest.json`) {
+      return site ? Response.json(site) : new Response('Not found', { status: 404 });
+    }
+    return Response.json(github);
+  });
   vi.stubGlobal('fetch', fetchMock);
   return fetchMock;
 }
@@ -106,16 +127,57 @@ describe('parseRelease', () => {
   });
 });
 
+describe('parseSiteRelease', () => {
+  it("downloads from the website's own copy", async () => {
+    const { service } = await load();
+    expect(service.parseSiteRelease(siteLatest())).toMatchObject({
+      version: '2.1.0',
+      apkUrl: `${SITE}download/trailcompass.2.1.0.apk`,
+      apkName: 'trailcompass.2.1.0.apk',
+      notes: ['Fuel fix & new dash UI'],
+      pageUrl: SITE,
+    });
+  });
+
+  it('only accepts an APK path inside download/', async () => {
+    const { service } = await load();
+    expect(service.parseSiteRelease({ ...siteLatest(), apk: 'https://example.com/evil.apk' })).toBeNull();
+    expect(service.parseSiteRelease({ ...siteLatest(), apk: 'download/../evil.apk' })).toBeNull();
+    expect(service.parseSiteRelease({ ...siteLatest(), version: 'latest' })).toBeNull();
+  });
+});
+
 describe('checkForAppUpdate', () => {
-  it('offers a newer release, and asks GitHub at most once a day', async () => {
+  it('offers a newer release, and checks at most once a day', async () => {
     const fetchMock = serve(release());
     const { service, last } = await load();
 
     await service.checkForAppUpdate();
     expect(last()).toMatchObject({ state: 'available', current: '2.0.0', prompt: true });
+    const requests = fetchMock.mock.calls.length;
 
     await service.checkForAppUpdate();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(requests);
+  });
+
+  it("prefers the website's copy and doesn't ask GitHub", async () => {
+    const fetchMock = serve(release(), siteLatest());
+    const { service, last } = await load();
+
+    await service.checkForAppUpdate();
+    expect(last()).toMatchObject({
+      state: 'available',
+      release: { apkUrl: `${SITE}download/trailcompass.2.1.0.apk` },
+    });
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([`${SITE}download/latest.json`]);
+  });
+
+  it('falls back to GitHub when the website has no copy', async () => {
+    serve(release());
+    const { service, last } = await load();
+
+    await service.checkForAppUpdate();
+    expect(last()).toMatchObject({ state: 'available', release: { apkUrl: APK_URL } });
   });
 
   it('says up to date when the installed version is the latest', async () => {

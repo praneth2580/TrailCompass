@@ -6,6 +6,10 @@ import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor
  * Checks the latest release about once a day, downloads its APK with
  * progress, and hands it to Android's installer. Android only replaces the
  * app if the new APK is signed with the same key.
+ *
+ * The website serves a copy of each release (download/latest.json, from
+ * .github/workflows/pages.yml), used first: GitHub's own release downloads
+ * are slow or stall on many mobile networks, and the site is on a CDN.
  */
 
 /** Native side: android/app/src/main/java/com/example/trailcompass/AppUpdaterPlugin.java */
@@ -22,9 +26,12 @@ interface AppUpdaterPlugin {
 const AppUpdater = registerPlugin<AppUpdaterPlugin>('AppUpdater');
 
 const REPO = 'praneth2580/TrailCompass';
+const SITE_URL = 'https://praneth2580.github.io/TrailCompass/';
+const SITE_LATEST_URL = `${SITE_URL}download/latest.json`;
 const LATEST_RELEASE_URL = `https://api.github.com/repos/${REPO}/releases/latest`;
-/** APKs are only fetched from this repo's releases. */
+/** From GitHub, APKs are only fetched from this repo's releases. */
 const DOWNLOAD_PREFIX = `https://github.com/${REPO}/releases/download/`;
+const SITE_APK_PATH = /^download\/[A-Za-z0-9._-]+\.apk$/;
 const PREFS_CHECKED_AT = 'tc.appUpdateCheckedAt';
 const PREFS_SNOOZE = 'tc.appUpdateSnooze';
 const CHECK_EVERY_MS = 24 * 60 * 60 * 1000;
@@ -98,12 +105,7 @@ async function runCheck(force: boolean): Promise<void> {
 
   setStatus({ state: 'checking' });
   try {
-    const response = await fetch(LATEST_RELEASE_URL, {
-      headers: { Accept: 'application/vnd.github+json' },
-      cache: 'no-cache',
-    });
-    if (!response.ok) throw new Error(`GitHub HTTP ${response.status}`);
-    const release = parseRelease(await response.json());
+    const release = await fetchLatestRelease();
     writePref(PREFS_CHECKED_AT, String(Date.now()));
 
     if (!release || compareVersions(release.version, current) <= 0) {
@@ -194,11 +196,51 @@ function watchForPermission(path: string): void {
   });
 }
 
+/** The newest release: the website's copy first, else GitHub's API. */
+async function fetchLatestRelease(): Promise<AppRelease | null> {
+  try {
+    const response = await fetch(SITE_LATEST_URL, { cache: 'no-cache' });
+    if (response.ok) {
+      const release = parseSiteRelease(await response.json());
+      if (release) return release;
+    }
+  } catch {
+    // Fall back to GitHub.
+  }
+  const response = await fetch(LATEST_RELEASE_URL, {
+    headers: { Accept: 'application/vnd.github+json' },
+    cache: 'no-cache',
+  });
+  if (!response.ok) throw new Error(`GitHub HTTP ${response.status}`);
+  return parseRelease(await response.json());
+}
+
+/** download/latest.json from the website → what the app needs, or null if unusable. */
+export function parseSiteRelease(raw: unknown): AppRelease | null {
+  const latest = raw as {
+    version?: unknown;
+    apk?: unknown;
+    size?: unknown;
+    notes?: unknown;
+  } | null;
+  if (!latest || typeof latest.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(latest.version)) {
+    return null;
+  }
+  if (typeof latest.apk !== 'string' || !SITE_APK_PATH.test(latest.apk)) return null;
+  return {
+    version: latest.version,
+    apkUrl: `${SITE_URL}${latest.apk}`,
+    apkName: latest.apk.slice('download/'.length),
+    sizeBytes: typeof latest.size === 'number' ? latest.size : 0,
+    notes: noteLines(latest.notes),
+    pageUrl: SITE_URL,
+  };
+}
+
 /** Release JSON from the GitHub API → what the app needs, or null if unusable. */
 export function parseRelease(raw: unknown): AppRelease | null {
   const release = raw as {
     tag_name?: unknown;
-    html_url?: unknown;
     body?: unknown;
     draft?: unknown;
     prerelease?: unknown;
@@ -217,25 +259,25 @@ export function parseRelease(raw: unknown): AppRelease | null {
   );
   if (!apk) return null;
 
-  const notes = typeof release.body === 'string'
-    ? release.body
-        .split(/\r?\n/)
-        .map((line) => line.replace(/^\s*(?:[-*+]|#{1,6}|\d+\.)\s+/, '').replace(/[*_`]/g, '').trim())
-        .filter(Boolean)
-        .slice(0, MAX_NOTES)
-    : [];
-
   return {
     version,
     apkUrl: apk.browser_download_url as string,
     apkName: apk.name as string,
     sizeBytes: typeof apk.size === 'number' ? apk.size : 0,
-    notes,
-    pageUrl:
-      typeof release.html_url === 'string'
-        ? release.html_url
-        : `https://github.com/${REPO}/releases/latest`,
+    notes: noteLines(release.body),
+    // The website's download button is the fast one.
+    pageUrl: SITE_URL,
   };
+}
+
+/** The first few lines of release notes, markdown stripped. */
+function noteLines(body: unknown): string[] {
+  if (typeof body !== 'string') return [];
+  return body
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*(?:[-*+]|#{1,6}|\d+\.)\s+/, '').replace(/[*_`]/g, '').trim())
+    .filter(Boolean)
+    .slice(0, MAX_NOTES);
 }
 
 /** Compares dotted versions numerically: 2.10.0 is newer than 2.9.0. */

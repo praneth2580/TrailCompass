@@ -10,15 +10,15 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/praneth2580/TrailCompass/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/praneth2580/TrailCompass?label=latest%20release&color=f0a020" /></a>
+  <a href="https://praneth2580.github.io/TrailCompass/"><img alt="Latest release" src="https://img.shields.io/github/v/release/praneth2580/TrailCompass?label=latest%20release&color=f0a020" /></a>
   <img alt="Android 6.0 or newer" src="https://img.shields.io/badge/Android-6.0%2B-3dbea5" />
   <img alt="Free, no account, no ads" src="https://img.shields.io/badge/free-no%20account%20%C2%B7%20no%20ads-4fcf84" />
 </p>
 
 <p align="center">
-  <a href="https://github.com/praneth2580/TrailCompass/releases/latest"><strong>Download the APK</strong></a>
+  <a href="https://praneth2580.github.io/TrailCompass/"><strong>Get TrailCompass for Android</strong></a>
   &nbsp;·&nbsp;
-  <a href="https://praneth2580.github.io/TrailCompass/"><strong>Visit the website</strong></a>
+  <a href="https://praneth2580.github.io/TrailCompass/#install">How to install</a>
 </p>
 
 ---
@@ -50,7 +50,7 @@ About **55,000 fuel stations** and **138,000 places to eat** across India are bu
 
 ## Install in a minute
 
-1. On your Android phone, [download the latest APK](https://github.com/praneth2580/TrailCompass/releases/latest) (about 10 MB).
+1. On your Android phone, open the [TrailCompass website](https://praneth2580.github.io/TrailCompass/) and tap **Download for Android** (about 10 MB).
 2. Open the downloaded file. If Android asks, let your browser install apps (*Install unknown apps*).
 3. Tap **Install**, open TrailCompass and allow location access.
 

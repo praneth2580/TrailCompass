@@ -4,7 +4,7 @@ This guide explains how TrailCompass works, one part at a time. It covers what e
 
 It describes the working tree as of **2026-10-23** (app version `1.1.0`, Android `versionCode 6`), including the uncommitted `src/routing/abort.ts` and `src/routing/overpass-scheduler.ts`.
 
-> The top-level `README.md` describes the original plan. Several parts are out of date: it says offline routing is not started, and its repository layout is missing about half of today's files. Where the two disagree, this guide follows the code.
+> `README.md` introduces the app to riders, and `DEVELOPMENT.md` is the quick start for developers: setup, scripts, releases and the website. This guide is the in-depth reference. Where they disagree, this guide follows the code.
 
 ---
 
@@ -806,7 +806,7 @@ These files define the interfaces for downloadable map regions. **None of it is 
 | `package-validator.ts` | Checks region metadata: ID, name, a valid `[w, s, e, n]` bounding box, size, attribution, licence, schema version. The comment says checksum checks are not done yet. |
 | `storage-manager.ts` | A Filesystem wrapper rooted at `map-packages/` (`Directory.Data`), with a `localStorage` fallback on the web. Reads and writes text files and deletes files. `getStorageInfo().freeBytes` is always `null`. |
 
-The README's design notes still apply: a WebView cannot read local PMTiles on its own, and it needs a range-request bridge. PMTiles files contain map tiles, not routing data.
+Design note for the future offline maps: a WebView cannot read local PMTiles files on its own; it needs a range-request bridge or a native plugin. Check local file access, memory use and app restarts on the target Android version before building large region downloads. PMTiles files contain map tiles, not routing data.
 
 ---
 
@@ -955,6 +955,7 @@ These came up while reading the code for this guide. Each one points to the rele
 - **Spoken turn prompts** for a helmet headset, with an on/off toggle in Route options (`voice-guidance.service.ts`).
 - **Fuel and food suggestions work again.** OSM maps few pumps and eateries along Indian highways, and the public Overpass servers often answer 504. The app now ships Overture Maps places for India in 1° tiles (`bundled-pois.service.ts`, built by `npm run data:poi`) and adds live OSM results only where those are few. Small areas use Nominatim; long stretches use one Overpass query (`poi-search.service.ts`). Fuel is searched over the last part of each tank leg, and each leg starts from the pump picked. A trip that fits in one tank says so instead of "no stations" (`stop-suggest.service.ts`).
 - **Fuel and food data updates itself without a new APK.** A weekly workflow (`.github/workflows/pages.yml`) publishes each new Overture release on GitHub Pages. The app downloads it about once a day when online (`poi-data.service.ts`), and the Offline tab shows the version in use. One-time setup: Settings → Pages → Source: GitHub Actions. See `public/assets/poi/README.md`.
+- **Downloads come from the website.** GitHub's own release downloads stall on many mobile networks. The Pages workflow now also runs when a release is published, and copies its APK to `download/` on the site, with `download/latest.json`. The landing page's download button and the in-app updater use that copy, falling back to GitHub. `README.md` links to the website, not to the APK. The two READMEs replace the original planning README.
 - **In-app updates.** `app-update.service.ts` checks GitHub's latest release about once a day. When there is a newer version, it shows an update sheet, but never during navigation. The sheet downloads the APK with progress and opens Android's installer. A small plugin in the app does the native part (`android/…/AppUpdaterPlugin.java`, registered in `MainActivity`; it needs the `REQUEST_INSTALL_PACKAGES` permission). The Offline tab shows the installed version and has a "Check for updates" button. Android only installs an update signed with the same key as the installed app: keep building releases on the same machine (its debug keystore), or move to a release keystore.
 - **Landing page on GitHub Pages** (<https://praneth2580.github.io/TrailCompass/>). The source is in `site/`: static HTML, CSS and a small script, with SEO and Open Graph tags. Its download buttons point at the newest GitHub release APK. `scripts/build-site.mjs` assembles it, and `.github/workflows/pages.yml` publishes it with the fuel and food data. Preview it with `npm run site:preview`. After changing the phone illustration, re-render the share image with `npm run site:og`.
 - **Dismissing the share sheet** no longer opens it a second time or shows an error.
@@ -984,8 +985,7 @@ Each fix below is covered by tests in `src/routing/*.test.ts` (`npm test`).
 5. **`sharp` is not a declared dependency.** `generate-icons.mjs` needs it, but today it is installed only indirectly (through `@jansoft/mbujkanji-valhalla-wasm` → `next`). Add it to `devDependencies`.
 6. **`release.mjs` needs `android/app/src/main/res/xml/config.xml`, which is gitignored.** It exists only after a `cap sync`, so a fresh clone fails at the version-bump step. The script also supports a token embedded in the `origin` URL, which means storing a credential in `.git/config`.
 7. **Placeholder app ID** `com.example.trailcompass` (see §16.1), and releases ship a debug APK.
-8. **README is out of date** (milestones, repository layout, "no routing yet").
-9. **`npm install <package>` fails with ERESOLVE.** `@jansoft/mbujkanji-valhalla-wasm` depends on `@vitest/browser-*@latest`, which wants a different `vitest` than the project's. Adding a package currently needs `--legacy-peer-deps`.
+8. **`npm install <package>` fails with ERESOLVE.** `@jansoft/mbujkanji-valhalla-wasm` depends on `@vitest/browser-*@latest`, which wants a different `vitest` than the project's. Adding a package currently needs `--legacy-peer-deps`.
 
 ---
 

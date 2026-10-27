@@ -90,7 +90,7 @@ export function AppUpdateSheet() {
     action = { label: 'Try again', run: () => void installAppUpdate() };
     body = (
       <a className="tc-update-link" href={release.pageUrl} target="_blank" rel="noreferrer">
-        Download in the browser instead
+        Get it from the website instead
       </a>
     );
   }
