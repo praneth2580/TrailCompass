@@ -7,9 +7,12 @@
 # - Push to main that changes the landing page: republishes it, carrying
 #   over the data that is already live.
 # - Run workflow: republishes now; tick "force" to rebuild the data too.
+# - A new app release: republishes so the site serves its APK.
 #
 # Site layout:
 #   index.html, styles.css, …    the landing page
+#   download/latest.json         the newest app release and its APK (read by the
+#   download/<name>.apk          landing page and src/services/app-update.service.ts)
 #   poi/manifest.json            the latest data release and its tile lists
 #   poi/<release>/<kind>/*.json  that release's tiles (read by src/services/poi-data.service.ts)
 #
@@ -31,6 +34,8 @@ on:
         description: Rebuild the fuel and food data even if it is already on the latest Overture release
         type: boolean
         default: false
+  release:
+    types: [published]
 
 permissions:
   contents: read
@@ -80,7 +85,7 @@ jobs:
           if [[ "$latest" != "$published" || "$FORCE" == "true" ]]; then
             build_data=true
           fi
-          # Scheduled runs only publish new data; pushes and manual runs always publish.
+          # Scheduled runs only publish new data; pushes, releases and manual runs always publish.
           deploy=true
           if [[ "$EVENT" == "schedule" && "$build_data" != "true" ]]; then
             echo "The published data is already on $latest."
@@ -133,6 +138,38 @@ jobs:
         run: |
           node scripts/build-site.mjs --out _site
           cp public/assets/poi/README.md _site/poi/README.md
+
+      - name: Add the newest app release
+        if: steps.plan.outputs.deploy == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The site serves the APK itself: GitHub's release downloads are slow
+          # or stall on many mobile networks; Pages is served through a CDN.
+          if ! gh release view --repo "$GITHUB_REPOSITORY" \
+              --json tagName,body,publishedAt,url,assets > "$RUNNER_TEMP/release.json"; then
+            echo "No published release yet; download buttons fall back to GitHub."
+            exit 0
+          fi
+          tag=$(jq -r .tagName "$RUNNER_TEMP/release.json")
+          apk=$(jq -r '[.assets[].name | select(test("^[A-Za-z0-9._-]+\\.apk$"))][0] // ""' "$RUNNER_TEMP/release.json")
+          if [[ ! "$tag" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ || -z "$apk" ]]; then
+            echo "::warning::Release $tag has no usable APK; download buttons fall back to GitHub."
+            exit 0
+          fi
+          mkdir -p _site/download
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern "$apk" --dir _site/download
+          jq --arg apk "$apk" --argjson size "$(stat -c %s "_site/download/$apk")" '{
+              version: (.tagName | ltrimstr("v")),
+              tag: .tagName,
+              apk: ("download/" + $apk),
+              apkName: $apk,
+              size: $size,
+              notes: (.body // ""),
+              publishedAt: .publishedAt,
+              releaseUrl: .url
+            }' "$RUNNER_TEMP/release.json" > _site/download/latest.json
+          echo "The site serves $apk ($tag)"
 
       - name: Upload the site
         if: steps.plan.outputs.deploy == 'true'
