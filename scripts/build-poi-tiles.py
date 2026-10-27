@@ -17,7 +17,7 @@ countries, including territorial waters so coastal places are not lost.
 The India scan takes about ten minutes. Without --release, the latest
 release is read from https://stac.overturemaps.org/catalog.json.
 
-The weekly GitHub workflow .github/workflows/poi-data.yml runs this with
+The weekly GitHub workflow .github/workflows/pages.yml runs this with
 --out when Overture publishes a new release, and publishes the result on
 GitHub Pages, where the app downloads it (src/services/poi-data.service.ts).
 """

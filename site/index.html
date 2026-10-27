@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="en-IN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>TrailCompass: Motorcycle Navigation App for India</title>
+    <meta
+      name="description"
+      content="Free Android navigation for motorcycle touring in India: bike-friendly routes, voice turn-by-turn, and fuel and food stops planned around your ride."
+    />
+    <link rel="canonical" href="https://praneth2580.github.io/TrailCompass/" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <meta name="theme-color" content="#06100c" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="application-name" content="TrailCompass" />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="favicon-32.png" sizes="32x32" type="image/png" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="TrailCompass" />
+    <meta property="og:locale" content="en_IN" />
+    <meta property="og:url" content="https://praneth2580.github.io/TrailCompass/" />
+    <meta property="og:title" content="TrailCompass: motorcycle navigation for India" />
+    <meta
+      property="og:description"
+      content="Bike-friendly routes, voice turn-by-turn, and fuel and food stops planned around your ride. Free for Android."
+    />
+    <meta property="og:image" content="https://praneth2580.github.io/TrailCompass/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="TrailCompass on a phone, navigating a motorcycle route with fuel and food stops"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="TrailCompass: motorcycle navigation for India" />
+    <meta
+      name="twitter:description"
+      content="Bike-friendly routes, voice turn-by-turn, and fuel and food stops planned around your ride. Free for Android."
+    />
+    <meta name="twitter:image" content="https://praneth2580.github.io/TrailCompass/og-image.png" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://api.github.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,600;9..40,700&family=IBM+Plex+Mono:wght@500&display=swap"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <script src="main.js" defer></script>
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "MobileApplication",
+        "name": "TrailCompass",
+        "url": "https://praneth2580.github.io/TrailCompass/",
+        "description": "Free Android navigation for motorcycle touring in India: bike-friendly routes, voice turn-by-turn, and fuel and food stops planned around your ride.",
+        "operatingSystem": "Android 6.0 or later",
+        "applicationCategory": "TravelApplication",
+        "downloadUrl": "https://github.com/praneth2580/TrailCompass/releases/latest",
+        "image": "https://praneth2580.github.io/TrailCompass/og-image.png",
+        "inLanguage": "en-IN",
+        "isAccessibleForFree": true,
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "INR" },
+        "featureList": [
+          "Motorcycle routes that avoid expressways closed to two-wheelers",
+          "Voice turn-by-turn navigation with automatic rerouting",
+          "Fuel stops planned by tank range",
+          "Meal stops planned by time of day",
+          "Save and share routes"
+        ]
+      }
+    </script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header">
+      <div class="container header-inner">
+        <a class="brand" href="./" aria-label="TrailCompass home">
+          <img src="favicon.svg" alt="" width="32" height="32" />
+          <span>TrailCompass</span>
+        </a>
+        <nav class="header-nav" aria-label="Sections">
+          <a href="#features">Features</a>
+          <a href="#stops">Fuel &amp; food</a>
+          <a href="#how">How it works</a>
+          <a href="#faq">FAQ</a>
+        </nav>
+        <a
+          class="btn btn-primary btn-small"
+          href="https://github.com/praneth2580/TrailCompass/releases/latest"
+          data-download
+        >
+          Download
+        </a>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="container hero-grid">
+          <div class="hero-copy">
+            <p class="eyebrow">Free Android app · Built for Indian roads</p>
+            <h1 id="hero-title">
+              Motorcycle navigation that plans your
+              <span class="accent">fuel and food stops</span>
+            </h1>
+            <p class="lede">
+              TrailCompass keeps you on roads bikes are allowed on, speaks every turn into your
+              helmet, and suggests petrol pumps and meal stops along the way.
+            </p>
+            <div class="cta-row">
+              <a
+                class="btn btn-primary btn-download"
+                href="https://github.com/praneth2580/TrailCompass/releases/latest"
+                data-download
+              >
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+                  <path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19.5h14" />
+                </svg>
+                <span class="btn-download-text">
+                  <span>Download for Android</span>
+                  <span class="btn-meta" data-release-meta>Free · Android 6.0+</span>
+                </span>
+              </a>
+              <a class="btn btn-ghost" href="#install">How to install</a>
+            </div>
+            <p class="ios-note" data-ios-note hidden>
+              TrailCompass is for Android phones. There is no iPhone version yet.
+            </p>
+            <ul class="trust-row" aria-label="Highlights">
+              <li>No account</li>
+              <li>No ads</li>
+              <li>Voice turn-by-turn</li>
+              <li>Works on weak signal</li>
+            </ul>
+          </div>
+
+          <div class="hero-visual">
+            <svg
+              id="phone"
+              class="phone"
+              viewBox="0 0 304 620"
+              role="img"
+              aria-labelledby="phone-title"
+            >
+              <title id="phone-title">
+                TrailCompass navigating: in 300 metres turn left, 142 kilometres and 2 hours
+                50 minutes to go, with fuel and food stops on the route
+              </title>
+              <defs>
+                <clipPath id="screen">
+                  <rect x="12" y="12" width="276" height="596" rx="36" />
+                </clipPath>
+              </defs>
+              <rect x="298" y="150" width="5" height="64" rx="2.5" fill="#1d2522" />
+              <rect x="1" y="1" width="298" height="618" rx="46" fill="#0d1311" stroke="#2b3530" stroke-width="2" />
+              <g clip-path="url(#screen)">
+                <rect x="12" y="12" width="276" height="596" fill="#f2efe9" />
+                <ellipse cx="52" cy="420" rx="70" ry="48" fill="#d4e7c3" />
+                <ellipse cx="250" cy="96" rx="58" ry="40" fill="#d4e7c3" />
+                <path d="M300 236c-58 20-80 84-62 150s58 82 62 86" fill="none" stroke="#a5c9ee" stroke-width="18" />
+                <g fill="none" stroke-linecap="round">
+                  <path d="M12 380h288M12 196c90 22 170 6 288-18M196 12c10 70 40 120 104 150M12 560c80-20 150-14 288 6M226 600c-4-80 14-150 74-206" stroke="#ddd5cb" stroke-width="9" />
+                  <path d="M12 380h288M12 196c90 22 170 6 288-18M196 12c10 70 40 120 104 150M12 560c80-20 150-14 288 6M226 600c-4-80 14-150 74-206" stroke="#ffffff" stroke-width="6" />
+                  <path d="M150 640V300l6-288M150 300c-14-10-28-14-54-30-14-8-18-22-18-40V12" stroke="#e8b97a" stroke-width="14" />
+                  <path d="M150 640V300l6-288M150 300c-14-10-28-14-54-30-14-8-18-22-18-40V12" stroke="#fde3b8" stroke-width="10" />
+                  <path d="M150 640V300c-14-10-28-14-54-30-14-8-18-22-18-40v-80" stroke="#f5a623" stroke-width="7" stroke-linejoin="round" />
+                </g>
+                <g class="pin">
+                  <path d="M123 238c-7 0-12 5-12 12 0 9 12 22 12 22s12-13 12-22c0-7-5-12-12-12z" fill="#3dbea5" stroke="#1a1205" stroke-width="1.5" />
+                  <circle cx="123" cy="250" r="6.5" fill="#1a1205" />
+                  <text x="123" y="253.5" text-anchor="middle" class="pin-glyph">F</text>
+                </g>
+                <g class="pin">
+                  <path d="M104 178c-7 0-12 5-12 12 0 9 12 22 12 22s12-13 12-22c0-7-5-12-12-12z" fill="#e07a5f" stroke="#1a1205" stroke-width="1.5" />
+                  <circle cx="104" cy="190" r="6.5" fill="#1a1205" />
+                  <text x="104" y="193.5" text-anchor="middle" class="pin-glyph">E</text>
+                </g>
+                <g class="pin">
+                  <path d="M78 106c-9 0-16 7-16 16 0 12 16 28 16 28s16-16 16-28c0-9-7-16-16-16z" fill="#f0a020" stroke="#1a1205" stroke-width="2" />
+                  <circle cx="78" cy="122" r="6" fill="#1a1205" />
+                  <circle cx="78" cy="122" r="3" fill="#f5f0e6" />
+                </g>
+                <path d="M150 405l12 27-12-6-12 6z" fill="#3b8ef0" stroke="#fff" stroke-width="2.4" stroke-linejoin="round" />
+                <circle cx="150" cy="22" r="4.5" fill="#000" />
+
+                <g class="hud">
+                  <rect x="24" y="36" width="124" height="28" rx="14" />
+                  <circle cx="38" cy="50" r="3.5" fill="#4fcf84" />
+                  <text x="48" y="54" class="hud-mono">±4 m</text>
+                  <text x="94" y="54" class="hud-text">62 km/h</text>
+                  <rect x="24" y="70" width="82" height="28" rx="14" />
+                  <circle cx="39" cy="84" r="9" fill="none" stroke="rgba(255,255,255,0.25)" />
+                  <path d="M39 76l3 8h-6z" fill="#f0a020" />
+                  <text x="54" y="88" class="hud-mono">N 4°</text>
+                </g>
+
+                <g class="banner">
+                  <rect x="22" y="472" width="256" height="112" rx="18" />
+                  <text x="40" y="507" class="banner-instruction">300 m — Turn left</text>
+                  <text x="40" y="552" class="banner-remaining">142.0 km · 2h 50m</text>
+                  <rect x="194" y="531" width="68" height="38" rx="10" class="banner-btn" />
+                  <text x="228" y="555" text-anchor="middle" class="banner-btn-text">Stop</text>
+                </g>
+              </g>
+            </svg>
+          </div>
+        </div>
+      </section>
+
+      <section id="features" class="section" aria-labelledby="features-title">
+        <div class="container">
+          <p class="section-kicker">Features</p>
+          <h2 id="features-title">Made for long days in the saddle</h2>
+          <ul class="feature-grid">
+            <li class="feature">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="6" cy="19" r="2" />
+                <circle cx="18" cy="5" r="2" />
+                <path d="M8 19h7.5a3.5 3.5 0 0 0 0-7h-7a3.5 3.5 0 0 1 0-7H16" />
+              </svg>
+              <h3>Routes for bikes</h3>
+              <p>
+                Choose Fastest, Shortest or Less traffic and compare up to three routes.
+                Expressways closed to two-wheelers are avoided unless you allow them.
+              </p>
+            </li>
+            <li class="feature">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 9.5v5h3.5L12 18V6L7.5 9.5H4z" />
+                <path d="M15.5 9a4.5 4.5 0 0 1 0 6" />
+                <path d="M18 6.5a8 8 0 0 1 0 11" />
+              </svg>
+              <h3>Voice turn-by-turn</h3>
+              <p>
+                Spoken prompts timed to your speed, straight into your helmet headset. Miss a
+                turn and the route recalculates on its own.
+              </p>
+            </li>
+            <li class="feature">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 20v-3M10 20v-6M15 20v-9M20 20V6" />
+              </svg>
+              <h3>Keeps going on weak signal</h3>
+              <p>
+                Routes are calculated on your phone. Once a route is planned, turn-by-turn,
+                voice prompts and stop suggestions work without a connection.
+              </p>
+            </li>
+            <li class="feature">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4.5 17.5a8.5 8.5 0 1 1 15 0" />
+                <path d="M12 14l4-5" />
+                <circle cx="12" cy="14" r="1.5" />
+              </svg>
+              <h3>Built for the handlebar</h3>
+              <p>
+                A full-screen ride view while you're moving, a screen that stays on, a compass,
+                and large touch targets that are easy to hit on the move.
+              </p>
+            </li>
+            <li class="feature">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="18" cy="5" r="2.5" />
+                <circle cx="6" cy="12" r="2.5" />
+                <circle cx="18" cy="19" r="2.5" />
+                <path d="M8.3 10.7l7.4-4.4M8.3 13.3l7.4 4.4" />
+              </svg>
+              <h3>Save and share rides</h3>
+              <p>
+                Keep trips in your library and open them later without planning again. Share a
+                route as a file with your riding group.
+              </p>
+            </li>
+            <li class="feature">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M19.5 11A7.5 7.5 0 0 0 6 6.6L4 8.5" />
+                <path d="M4 4.5v4h4" />
+                <path d="M4.5 13A7.5 7.5 0 0 0 18 17.4l2-1.9" />
+                <path d="M20 19.5v-4h-4" />
+              </svg>
+              <h3>Fresh data, no reinstall</h3>
+              <p>
+                Fuel and food places are refreshed every month and download on their own. No
+                need to update the app for new data.
+              </p>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="stops" class="section section-stops" aria-labelledby="stops-title">
+        <div class="container stops-grid">
+          <div>
+            <p class="section-kicker">Fuel &amp; food</p>
+            <h2 id="stops-title">Stops that fit your ride</h2>
+            <p class="section-copy">
+              Tell TrailCompass your tank range and it picks pumps near your route in the last
+              stretch of each tank, then plans the next leg from there. If a stretch has no
+              pump, it tells you to fill up earlier.
+            </p>
+            <p class="section-copy">
+              Set when you leave and it finds breakfast, lunch or dinner where you'll be at that
+              hour. Every place is built into the app, so suggestions work offline.
+            </p>
+            <dl class="stats">
+              <div>
+                <dt>Fuel stations</dt>
+                <dd data-count="fuel">54,919</dd>
+              </div>
+              <div>
+                <dt>Places to eat</dt>
+                <dd data-count="food">1,37,976</dd>
+              </div>
+              <div>
+                <dt>Refreshed</dt>
+                <dd>Monthly</dd>
+              </div>
+            </dl>
+          </div>
+
+          <div class="suggest-demo" aria-label="Example stop suggestions">
+            <div class="suggest-head">
+              <span class="badge badge-fuel" aria-hidden="true">F</span>
+              <div>
+                <p class="suggest-title">Fuel by tank range</p>
+                <p class="suggest-hint">Tank range 150 km · stations at about 105 km</p>
+              </div>
+            </div>
+            <div class="suggest-card">
+              <div>
+                <p class="suggest-name">Hindustan Petroleum</p>
+                <p class="suggest-meta">108.0 km into the trip · 108.0 km from the start</p>
+                <p class="suggest-meta">210 m off route</p>
+              </div>
+              <span class="suggest-add">Add</span>
+            </div>
+            <div class="suggest-head">
+              <span class="badge badge-food" aria-hidden="true">E</span>
+              <div>
+                <p class="suggest-title">Food by time of day</p>
+                <p class="suggest-hint">Leaving 07:00 · breakfast and lunch</p>
+              </div>
+            </div>
+            <div class="suggest-card">
+              <div>
+                <p class="suggest-name">Park N Dine</p>
+                <p class="suggest-meta">Breakfast near 08:30 · 47.6 km into the trip</p>
+              </div>
+              <span class="suggest-add">Add</span>
+            </div>
+            <p class="suggest-foot">Example suggestions for a ride on NH66 from Panvel.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="how" class="section" aria-labelledby="how-title">
+        <div class="container">
+          <p class="section-kicker">How it works</p>
+          <h2 id="how-title">Plan, preview, ride</h2>
+          <ol class="steps">
+            <li>
+              <h3>Plan</h3>
+              <p>
+                Search for your destination or drop a pin on the map. Add fuel, food or your own
+                stops in the order you want them.
+              </p>
+            </li>
+            <li>
+              <h3>Preview</h3>
+              <p>
+                Compare up to three routes by distance and time. Save the one you like, or share
+                it with the group.
+              </p>
+            </li>
+            <li>
+              <h3>Ride</h3>
+              <p>
+                Tap Start and follow the voice prompts. Go off route and it recalculates, keeping
+                the stops you haven't reached yet.
+              </p>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section id="install" class="section section-install" aria-labelledby="install-title">
+        <div class="container install-grid">
+          <div>
+            <p class="section-kicker">Install</p>
+            <h2 id="install-title">Install in a minute</h2>
+            <ol class="install-steps">
+              <li>On your Android phone, tap <strong>Download</strong>. The file is about 10 MB.</li>
+              <li>
+                Open the downloaded file. If Android asks, let your browser install apps
+                (<em>Install unknown apps</em>).
+              </li>
+              <li>Tap <strong>Install</strong>, open TrailCompass and allow location access.</li>
+            </ol>
+            <p class="install-note">
+              TrailCompass isn't on Google Play yet, so Android may warn you about installing an
+              app from outside it.
+            </p>
+            <div class="cta-row">
+              <a
+                class="btn btn-primary btn-download"
+                href="https://github.com/praneth2580/TrailCompass/releases/latest"
+                data-download
+              >
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+                  <path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19.5h14" />
+                </svg>
+                <span class="btn-download-text">
+                  <span>Download for Android</span>
+                  <span class="btn-meta" data-release-meta>Free · Android 6.0+</span>
+                </span>
+              </a>
+            </div>
+            <p class="ios-note" data-ios-note hidden>
+              TrailCompass is for Android phones. There is no iPhone version yet.
+            </p>
+          </div>
+          <aside class="qr-card" aria-label="Open this page on your phone">
+            <img src="qr.svg" alt="QR code for this page" width="168" height="168" />
+            <p><strong>On a computer?</strong> Scan with your Android phone to open this page there.</p>
+          </aside>
+        </div>
+      </section>
+
+      <section id="faq" class="section" aria-labelledby="faq-title">
+        <div class="container container-narrow">
+          <p class="section-kicker">FAQ</p>
+          <h2 id="faq-title">Questions riders ask</h2>
+          <div class="faq">
+            <details>
+              <summary>Is TrailCompass free?</summary>
+              <p>Yes. There's no account to create and no ads.</p>
+            </details>
+            <details>
+              <summary>Does it work offline?</summary>
+              <p>
+                Partly. Plan your route while you have a connection: the roads are saved on your
+                phone, and turn-by-turn, voice prompts and fuel and food suggestions then work
+                without signal. The background map needs a connection to load areas you haven't
+                viewed.
+              </p>
+            </details>
+            <details>
+              <summary>Which phones does it run on?</summary>
+              <p>Android 6.0 or newer. There is no iPhone version.</p>
+            </details>
+            <details>
+              <summary>Why isn't it on Google Play?</summary>
+              <p>
+                It isn't listed there yet. Each release is published on GitHub, and the download
+                button always gets the newest one.
+              </p>
+            </details>
+            <details>
+              <summary>How do I update?</summary>
+              <p>
+                Download the newest file and install it over the app you have. Fuel and food data
+                updates on its own every month, without a new install.
+              </p>
+            </details>
+            <details>
+              <summary>Where does the map and place data come from?</summary>
+              <p>
+                Maps, roads and search come from OpenStreetMap, through OpenFreeMap, Overpass and
+                Nominatim. Fuel stations and places to eat come from the Overture Maps Foundation
+                and OpenStreetMap.
+              </p>
+            </details>
+            <details>
+              <summary>Does it collect my data?</summary>
+              <p>
+                There's no account and no analytics. To show the map and plan routes, the app
+                downloads data for the areas you use from the open-data services above.
+              </p>
+            </details>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-inner">
+        <div class="footer-brand">
+          <a class="brand" href="./">
+            <img src="favicon.svg" alt="" width="28" height="28" />
+            <span>TrailCompass</span>
+          </a>
+          <p>Motorcycle navigation for India. Latest release: <span data-release-version>on GitHub</span>.</p>
+        </div>
+        <nav class="footer-links" aria-label="Project">
+          <a href="https://github.com/praneth2580/TrailCompass">Source code</a>
+          <a href="https://github.com/praneth2580/TrailCompass/releases">All releases</a>
+          <a href="https://github.com/praneth2580/TrailCompass/issues">Report a problem</a>
+          <a href="https://github.com/praneth2580/TrailCompass/blob/main/public/assets/poi/README.md">Data sources and licences</a>
+        </nav>
+        <p class="attribution">
+          Map data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>.
+          Places from the <a href="https://overturemaps.org">Overture Maps Foundation</a>.
+        </p>
+      </div>
+    </footer>
+  </body>
+</html>

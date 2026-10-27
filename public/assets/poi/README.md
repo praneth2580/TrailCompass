@@ -20,9 +20,10 @@ It adds live OpenStreetMap results where the bundled ones are few
 
 ## Updates without a new APK
 
-`.github/workflows/poi-data.yml` runs every Monday. When Overture has
+`.github/workflows/pages.yml` runs every Monday. When Overture has
 published a new release, the workflow rebuilds the tiles and publishes them
-on GitHub Pages at <https://praneth2580.github.io/TrailCompass/poi/>:
+on GitHub Pages, next to the landing page, at
+<https://praneth2580.github.io/TrailCompass/poi/>:
 
 - `poi/manifest.json`: the latest release
 - `poi/<release>/…`: its tiles
@@ -37,7 +38,7 @@ as the fallback. The Offline tab shows the version in use and has a
 One-time setup on GitHub:
 
 1. Settings → Pages → Build and deployment → Source: **GitHub Actions**.
-2. Actions → Publish POI data → **Run workflow**, to publish the first copy.
+2. Actions → Publish site → **Run workflow**, to publish the first copy.
 
 A fork can point the app at its own site by building with
 `VITE_POI_DATA_URL=https://<owner>.github.io/<repo>/poi`.

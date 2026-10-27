@@ -111,6 +111,7 @@ trailcompass/
 │   └── favicon / icons
 │
 ├── resources/                  Master icon (png/svg) for tooling
+├── site/                       Landing page for GitHub Pages (see scripts/build-site.mjs)
 ├── scripts/                    Android build/run, release, icon generation
 └── android/                    Capacitor-generated Android Studio project
 ```
@@ -952,7 +953,8 @@ These came up while reading the code for this guide. Each one points to the rele
 - **The Android back button** closes the open sheet, then map-pick or ride view, then returns to the Map tab. During navigation, leaving the app needs a second press (`hooks/useBackHandler.ts`, `App.tsx`).
 - **Spoken turn prompts** for a helmet headset, with an on/off toggle in Route options (`voice-guidance.service.ts`).
 - **Fuel and food suggestions work again.** OSM maps few pumps and eateries along Indian highways, and the public Overpass servers often answer 504. The app now ships Overture Maps places for India in 1° tiles (`bundled-pois.service.ts`, built by `npm run data:poi`) and adds live OSM results only where those are few. Small areas use Nominatim; long stretches use one Overpass query (`poi-search.service.ts`). Fuel is searched over the last part of each tank leg, and each leg starts from the pump picked. A trip that fits in one tank says so instead of "no stations" (`stop-suggest.service.ts`).
-- **Fuel and food data updates itself without a new APK.** A weekly workflow (`.github/workflows/poi-data.yml`) publishes each new Overture release on GitHub Pages. The app downloads it about once a day when online (`poi-data.service.ts`), and the Offline tab shows the version in use. One-time setup: Settings → Pages → Source: GitHub Actions. See `public/assets/poi/README.md`.
+- **Fuel and food data updates itself without a new APK.** A weekly workflow (`.github/workflows/pages.yml`) publishes each new Overture release on GitHub Pages. The app downloads it about once a day when online (`poi-data.service.ts`), and the Offline tab shows the version in use. One-time setup: Settings → Pages → Source: GitHub Actions. See `public/assets/poi/README.md`.
+- **Landing page on GitHub Pages** (<https://praneth2580.github.io/TrailCompass/>). The source is in `site/`: static HTML, CSS and a small script, with SEO and Open Graph tags. Its download buttons point at the newest GitHub release APK. `scripts/build-site.mjs` assembles it, and `.github/workflows/pages.yml` publishes it with the fuel and food data. Preview it with `npm run site:preview`. After changing the phone illustration, re-render the share image with `npm run site:og`.
 - **Dismissing the share sheet** no longer opens it a second time or shows an error.
 - **The map stays mounted across tabs**, so it no longer reloads or loses its camera.
 - **`npm test` skips `*.scratch.test.ts`** (live OSM requests). Run them with `LIVE_OSM=1 npm test`.

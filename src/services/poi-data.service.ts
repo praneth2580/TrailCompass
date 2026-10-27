@@ -5,7 +5,7 @@ import type { PoiKind } from '../types/trip-stop';
 /**
  * Where the fuel and food places come from, and keeping them fresh without
  * a new APK. The app ships a copy (public/assets/poi). A weekly GitHub
- * workflow (.github/workflows/poi-data.yml) publishes newer Overture
+ * workflow (.github/workflows/pages.yml) publishes newer Overture
  * releases on GitHub Pages; the app downloads them into its data folder
  * and uses whichever copy is newer.
  */

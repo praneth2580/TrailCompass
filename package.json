@@ -17,7 +17,10 @@
     "release:minor": "node scripts/release.mjs minor",
     "release:major": "node scripts/release.mjs major",
     "icons:generate": "node scripts/generate-icons.mjs",
-    "data:poi": "python3 scripts/build-poi-tiles.py"
+    "data:poi": "python3 scripts/build-poi-tiles.py",
+    "site:build": "node scripts/build-site.mjs",
+    "site:preview": "node scripts/build-site.mjs && vite preview --outDir _site",
+    "site:og": "node scripts/render-og-image.mjs"
   },
   "dependencies": {
     "@capacitor-community/keep-awake": "^7.1.0",

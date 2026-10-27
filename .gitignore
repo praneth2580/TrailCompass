@@ -42,5 +42,5 @@ __pycache__/
 .venv/
 venv/
 
-# GitHub Pages build output (.github/workflows/poi-data.yml)
+# GitHub Pages build output (.github/workflows/pages.yml)
 _site/
