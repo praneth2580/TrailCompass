@@ -1791,14 +1791,10 @@ button.tc-plan-row:active {
 
 .tc-route-sheet {
   position: relative;
-  left: auto;
-  right: auto;
-  bottom: auto;
   z-index: 2;
   width: 100%;
-  max-width: none;
-  max-height: min(52dvh, 26rem);
-  border-radius: 18px;
+  max-height: min(52dvh, 24rem);
+  border-radius: 16px;
   border: 1px solid var(--tc-border);
   background: rgba(8, 16, 12, 0.94);
   box-shadow: var(--tc-shadow);
@@ -1816,9 +1812,10 @@ button.tc-plan-row:active {
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;
-  gap: 0.65rem;
+  gap: 0.6rem;
   width: 100%;
-  padding: 0.65rem 0.85rem;
+  min-height: 3rem;
+  padding: 0.5rem 0.8rem 0.5rem 0.6rem;
   border: none;
   background: transparent;
   color: var(--tc-text);
@@ -1826,35 +1823,34 @@ button.tc-plan-row:active {
   cursor: pointer;
 }
 
-.tc-route-sheet-handle:disabled {
-  cursor: default;
-  opacity: 0.95;
-}
-
-.tc-route-sheet-grip {
-  width: 2rem;
-  height: 4px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.18);
-  justify-self: start;
+.tc-route-sheet-icon {
+  display: grid;
+  place-items: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 50%;
+  background: var(--tc-accent-soft);
+  color: var(--tc-accent);
 }
 
 .tc-route-sheet-summary {
   display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
+  align-items: baseline;
+  gap: 0.5rem;
   min-width: 0;
 }
 
 .tc-route-sheet-summary strong {
+  flex-shrink: 0;
   font-family: var(--tc-font-display);
   font-size: 0.95rem;
   font-weight: 700;
 }
 
 .tc-route-sheet-summary span {
+  min-width: 0;
   color: var(--tc-muted);
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1862,181 +1858,157 @@ button.tc-plan-row:active {
 
 .tc-route-sheet-chevron {
   color: var(--tc-muted);
-  font-size: 0.9rem;
+  font-size: 0.85rem;
 }
 
 .tc-route-sheet-body {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  padding: 0 0.85rem 0.85rem;
-  border-top: 1px solid var(--tc-border);
-  padding-top: 0.75rem;
-  overflow: auto;
+  gap: 0.55rem;
   min-height: 0;
+  padding: 0.7rem 0.8rem 0.8rem;
+  border-top: 1px solid var(--tc-border);
+  overflow: auto;
 }
 
-.tc-route-section {
+/* Route type: one segmented control. */
+.tc-route-type {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px;
+  padding: 3px;
+  border-radius: 12px;
+  border: 1px solid var(--tc-border);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.tc-route-type-option {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  min-width: 0;
+  min-height: 2.5rem;
+  padding: 0 0.35rem;
+  border: none;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--tc-muted);
+  font-family: var(--tc-font-display);
+  font-size: 0.8rem;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.tc-route-type-option svg {
+  flex-shrink: 0;
+}
+
+.tc-route-type-option-active {
+  background: var(--tc-accent);
+  color: #1a1205;
+}
+
+/* Settings: two switches side by side. */
+.tc-route-switches {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.4rem;
 }
 
-.tc-route-section-row {
+.tc-route-switch {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-}
-
-.tc-route-section-label {
-  margin: 0;
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--tc-muted);
-}
-
-.tc-route-type {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.4rem;
-}
-
-.tc-route-type-option {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.28rem;
-  min-height: 4.4rem;
-  padding: 0.55rem 0.35rem 0.5rem;
-  border-radius: 14px;
+  min-width: 0;
+  min-height: 2.5rem;
+  padding: 0 0.6rem 0 0.75rem;
+  border-radius: 10px;
   border: 1px solid var(--tc-border);
   background: rgba(255, 255, 255, 0.03);
-  color: var(--tc-muted);
-  text-align: center;
-  cursor: pointer;
-  transition:
-    border-color 150ms ease,
-    background 150ms ease,
-    color 150ms ease,
-    box-shadow 150ms ease,
-    transform 120ms ease;
-}
-
-.tc-route-type-option:active {
-  transform: scale(0.97);
-}
-
-.tc-route-type-option-active {
-  border-color: var(--tc-border-strong);
-  background: linear-gradient(
-    180deg,
-    rgba(240, 160, 32, 0.22) 0%,
-    rgba(240, 160, 32, 0.08) 100%
-  );
   color: var(--tc-text);
-  box-shadow:
-    inset 0 2px 0 rgba(240, 160, 32, 0.85),
-    0 6px 16px rgba(0, 0, 0, 0.22);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
 }
 
-.tc-route-type-icon {
-  display: grid;
-  place-items: center;
-  width: 2rem;
-  height: 2rem;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid var(--tc-border);
-  color: var(--tc-muted);
-}
-
-.tc-route-type-option-active .tc-route-type-icon {
-  background: var(--tc-accent);
-  border-color: transparent;
-  color: #1a1205;
-}
-
-.tc-route-type-title {
-  font-family: var(--tc-font-display);
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  line-height: 1.15;
-  color: inherit;
-}
-
-.tc-route-type-hint {
-  font-size: 0.62rem;
-  line-height: 1.2;
-  color: var(--tc-muted);
-  max-width: 100%;
+.tc-route-switch > span:first-child {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.tc-route-type-option-active .tc-route-type-hint {
-  color: rgba(238, 243, 236, 0.78);
-}
-
-.tc-route-type-desc {
-  margin: 0.15rem 0 0;
-  padding: 0.5rem 0.65rem;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.035);
-  border-left: 2px solid var(--tc-accent);
-  color: var(--tc-muted);
-  font-size: 0.72rem;
-  line-height: 1.4;
-}
-
-.tc-route-type-desc-label {
-  display: inline;
-  margin-right: 0.35rem;
-  color: var(--tc-accent);
-  font-family: var(--tc-font-display);
-  font-weight: 700;
-  font-size: 0.7rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.tc-route-type-desc-label::after {
-  content: '·';
-  margin-left: 0.35rem;
-  color: rgba(138, 161, 148, 0.7);
-  font-weight: 500;
-  text-transform: none;
-  letter-spacing: 0;
-}
-
-.tc-route-toggle {
-  min-height: 1.7rem;
-  padding: 0.2rem 0.55rem;
+.tc-route-switch-track {
+  position: relative;
+  flex-shrink: 0;
+  width: 2rem;
+  height: 1.15rem;
   border-radius: 999px;
-  border: 1px solid var(--tc-border);
-  background: transparent;
+  background: rgba(255, 255, 255, 0.16);
+  transition: background 150ms ease;
+}
+
+.tc-route-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: calc(1.15rem - 4px);
+  height: calc(1.15rem - 4px);
+  border-radius: 50%;
+  background: var(--tc-text);
+  transition: transform 150ms ease;
+}
+
+.tc-route-switch[aria-checked='true'] .tc-route-switch-track {
+  background: var(--tc-accent);
+}
+
+.tc-route-switch[aria-checked='true'] .tc-route-switch-thumb {
+  background: #1a1205;
+  transform: translateX(calc(2rem - 1.15rem));
+}
+
+.tc-route-note {
+  margin: 0;
   color: var(--tc-muted);
-  font-size: 0.68rem;
+  font-size: 0.74rem;
+}
+
+/* Routes to pick from. */
+.tc-route-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.tc-route-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--tc-muted);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.tc-route-show-all {
+  padding: 0.25rem 0;
+  border: none;
+  background: none;
+  color: var(--tc-accent);
+  font-size: 0.76rem;
   font-weight: 700;
   cursor: pointer;
-}
-
-.tc-route-toggle-on {
-  border-color: var(--tc-border-strong);
-  background: var(--tc-accent-soft);
-  color: var(--tc-accent);
 }
 
 .tc-route-cards {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.3rem;
   max-height: 9.5rem;
   overflow: auto;
 }
@@ -2045,10 +2017,9 @@ button.tc-plan-row:active {
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: center;
-  gap: 0.5rem;
-  width: 100%;
-  padding: 0.35rem 0.4rem 0.35rem 0.55rem;
-  border-radius: 12px;
+  gap: 0.4rem;
+  padding: 0 0.35rem 0 0.3rem;
+  border-radius: 10px;
   border: 1px solid var(--tc-border);
   background: rgba(255, 255, 255, 0.03);
   color: var(--tc-text);
@@ -2061,11 +2032,12 @@ button.tc-plan-row:active {
 
 .tc-route-card-pick {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 0.65rem;
+  gap: 0.55rem;
   min-width: 0;
-  padding: 0.35rem 0.25rem;
+  min-height: 2.75rem;
+  padding: 0 0.35rem;
   border: none;
   background: transparent;
   color: inherit;
@@ -2080,24 +2052,19 @@ button.tc-plan-row:active {
   box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.25);
 }
 
-.tc-route-card-body {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  min-width: 0;
-}
-
 .tc-route-card-title {
   display: flex;
   align-items: center;
   gap: 0.4rem;
+  min-width: 0;
   font-family: var(--tc-font-display);
-  font-size: 0.92rem;
+  font-size: 0.88rem;
   font-weight: 700;
+  white-space: nowrap;
 }
 
 .tc-route-card-badge {
-  padding: 0.1rem 0.35rem;
+  padding: 0.05rem 0.35rem;
   border-radius: 999px;
   background: rgba(240, 160, 32, 0.22);
   color: var(--tc-accent);
@@ -2108,27 +2075,24 @@ button.tc-plan-row:active {
 }
 
 .tc-route-card-meta {
-  display: flex;
-  gap: 0.35rem;
   font-family: var(--tc-font-mono);
-  font-size: 0.72rem;
+  font-size: 0.74rem;
   color: var(--tc-muted);
+  white-space: nowrap;
 }
 
 .tc-route-card-action {
-  flex-shrink: 0;
-  min-width: 3.6rem;
-  padding: 0.35rem 0.55rem;
-  border-radius: 999px;
+  min-width: 2.9rem;
+  min-height: 2.1rem;
+  padding: 0 0.6rem;
+  border-radius: 8px;
   border: 1px solid var(--tc-border);
   background: transparent;
   color: var(--tc-muted);
   font-family: var(--tc-font-display);
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  text-align: center;
+  cursor: pointer;
 }
 
 .tc-route-card-action-on {
@@ -2137,8 +2101,7 @@ button.tc-plan-row:active {
   color: #1a1205;
 }
 
-.tc-route-empty,
-.tc-route-footnote {
+.tc-route-empty {
   margin: 0;
   color: var(--tc-muted);
   font-size: 0.72rem;

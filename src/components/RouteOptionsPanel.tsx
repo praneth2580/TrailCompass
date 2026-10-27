@@ -53,167 +53,111 @@ export function RouteOptionsPanel({
 
   if (!visible) return null;
 
-  const sheetExpanded = expanded;
-
-  const activeProfile = getProfile(profile);
-  const selected = alternatives[selectedIndex];
+  const selected = alternatives[selectedIndex] ?? alternatives[0];
 
   return (
     <section
-      className={
-        sheetExpanded
-          ? 'tc-route-sheet'
-          : 'tc-route-sheet tc-route-sheet-collapsed'
-      }
+      className={expanded ? 'tc-route-sheet' : 'tc-route-sheet tc-route-sheet-collapsed'}
       aria-label="Route options"
     >
       <button
         type="button"
         className="tc-route-sheet-handle"
         onClick={() => setExpanded((v) => !v)}
-        aria-expanded={sheetExpanded}
+        aria-expanded={expanded}
       >
-        <span className="tc-route-sheet-grip" aria-hidden />
+        <span className="tc-route-sheet-icon" aria-hidden>
+          <ProfileIcon id={profile} />
+        </span>
         <span className="tc-route-sheet-summary">
-          <strong>
-            {hasRoutes
-              ? `Taking: ${routeLabel(selected ?? alternatives[0]!, selectedIndex)}`
-              : activeProfile.label}
-          </strong>
           {selected ? (
-            <span>
-              {formatKm(selected.distanceMeters)} ·{' '}
-              {formatEta(selected.durationSeconds)}
-            </span>
+            <>
+              <strong>{routeLabel(selected, selectedIndex)}</strong>
+              <span>
+                {formatKm(selected.distanceMeters)} · {formatEta(selected.durationSeconds)}
+              </span>
+            </>
           ) : (
-            <span>Route type · then Plan</span>
+            <>
+              <strong>{getProfile(profile).label}</strong>
+              <span>
+                {allowExpressways ? 'Expressways allowed' : 'No expressways'}
+                {voiceGuidance ? ' · Voice on' : ''}
+              </span>
+            </>
           )}
         </span>
         <span className="tc-route-sheet-chevron" aria-hidden>
-          {sheetExpanded ? '▾' : '▴'}
+          {expanded ? '▾' : '▴'}
         </span>
       </button>
 
-      {sheetExpanded ? (
+      {expanded ? (
         <div className="tc-route-sheet-body">
-          <div className="tc-route-section">
-            <p className="tc-route-section-label">Route type</p>
-            <div
-              className="tc-route-type"
-              role="radiogroup"
-              aria-label="Route type"
-            >
-              {ROUTING_PROFILES.map((p) => {
-                const active = profile === p.id;
-                return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={active}
-                    className={
-                      active
-                        ? 'tc-route-type-option tc-route-type-option-active'
-                        : 'tc-route-type-option'
-                    }
-                    title={p.description}
-                    onClick={() => onProfileChange(p.id)}
-                  >
-                    <span className="tc-route-type-icon" aria-hidden>
-                      <ProfileIcon id={p.id} />
-                    </span>
-                    <span className="tc-route-type-title">{p.label}</span>
-                    <span className="tc-route-type-hint">
-                      {profileHint(p.id)}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-            <p className="tc-route-type-desc" key={activeProfile.id}>
-              <span className="tc-route-type-desc-label">
-                {activeProfile.label}
-              </span>
-              {activeProfile.description}
-            </p>
-            <div className="tc-route-section-row">
-              <p className="tc-route-section-label">
-                Expressways · most in India ban two-wheelers
-              </p>
-              <button
-                type="button"
-                className={
-                  allowExpressways
-                    ? 'tc-route-toggle tc-route-toggle-on'
-                    : 'tc-route-toggle'
-                }
-                aria-pressed={allowExpressways}
-                onClick={() => onAllowExpresswaysChange(!allowExpressways)}
-              >
-                {allowExpressways ? 'Allowed' : 'Avoided'}
-              </button>
-            </div>
-            <div className="tc-route-section-row">
-              <p className="tc-route-section-label">
-                Voice prompts · spoken turns while navigating
-              </p>
-              <button
-                type="button"
-                className={
-                  voiceGuidance
-                    ? 'tc-route-toggle tc-route-toggle-on'
-                    : 'tc-route-toggle'
-                }
-                aria-pressed={voiceGuidance}
-                onClick={() => onVoiceGuidanceChange(!voiceGuidance)}
-              >
-                {voiceGuidance ? 'On' : 'Off'}
-              </button>
-            </div>
+          <div className="tc-route-type" role="radiogroup" aria-label="Route type">
+            {ROUTING_PROFILES.map((p) => {
+              const active = profile === p.id;
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  className={
+                    active
+                      ? 'tc-route-type-option tc-route-type-option-active'
+                      : 'tc-route-type-option'
+                  }
+                  title={p.description}
+                  onClick={() => onProfileChange(p.id)}
+                >
+                  <ProfileIcon id={p.id} />
+                  {p.label}
+                </button>
+              );
+            })}
           </div>
 
+          <div className="tc-route-switches">
+            <Switch
+              label="Expressways"
+              checked={allowExpressways}
+              onChange={onAllowExpresswaysChange}
+            />
+            <Switch
+              label="Voice prompts"
+              checked={voiceGuidance}
+              onChange={onVoiceGuidanceChange}
+            />
+          </div>
+          {allowExpressways ? (
+            <p className="tc-route-note">Most expressways in India ban two-wheelers.</p>
+          ) : null}
+
           {hasRoutes ? (
-            <div className="tc-route-section">
-              <div className="tc-route-section-row">
-                <p className="tc-route-section-label">
-                  {alternatives.length === 1
-                    ? 'Your route'
-                    : 'Pick the route you will take'}
-                </p>
-                {alternatives.length > 1 ? (
+            <div className="tc-route-list">
+              {alternatives.length > 1 ? (
+                <div className="tc-route-list-head">
+                  <span>Pick a route</span>
                   <button
                     type="button"
-                    className={
-                      showAllRoutes
-                        ? 'tc-route-toggle tc-route-toggle-on'
-                        : 'tc-route-toggle'
-                    }
+                    className="tc-route-show-all"
                     aria-pressed={showAllRoutes}
                     onClick={() => onToggleShowAll(!showAllRoutes)}
                   >
-                    {showAllRoutes ? 'Showing all' : 'Show all on map'}
+                    {showAllRoutes ? 'Hide others' : 'Show all on map'}
                   </button>
-                ) : null}
-              </div>
-
-              <div
-                className="tc-route-cards"
-                role="listbox"
-                aria-label="Available routes"
-              >
+                </div>
+              ) : null}
+              <div className="tc-route-cards" role="listbox" aria-label="Available routes">
                 {alternatives.map((route, index) => {
                   const active = index === selectedIndex;
-                  const swatch = ROUTE_SWATCHES[index % ROUTE_SWATCHES.length]!;
                   return (
                     <div
                       key={route.id ?? index}
                       role="option"
                       aria-selected={active}
-                      className={
-                        active
-                          ? 'tc-route-card tc-route-card-active'
-                          : 'tc-route-card'
-                      }
+                      className={active ? 'tc-route-card tc-route-card-active' : 'tc-route-card'}
                     >
                       <button
                         type="button"
@@ -222,21 +166,15 @@ export function RouteOptionsPanel({
                       >
                         <span
                           className="tc-route-card-swatch"
-                          style={{ background: swatch }}
+                          style={{ background: ROUTE_SWATCHES[index % ROUTE_SWATCHES.length] }}
                           aria-hidden
                         />
-                        <span className="tc-route-card-body">
-                          <span className="tc-route-card-title">
-                            {routeLabel(route, index)}
-                            {index === 0 ? (
-                              <span className="tc-route-card-badge">Best</span>
-                            ) : null}
-                          </span>
-                          <span className="tc-route-card-meta">
-                            <span>{formatKm(route.distanceMeters)}</span>
-                            <span aria-hidden>·</span>
-                            <span>{formatEta(route.durationSeconds)}</span>
-                          </span>
+                        <span className="tc-route-card-title">
+                          {routeLabel(route, index)}
+                          {index === 0 ? <span className="tc-route-card-badge">Best</span> : null}
+                        </span>
+                        <span className="tc-route-card-meta">
+                          {formatKm(route.distanceMeters)} · {formatEta(route.durationSeconds)}
                         </span>
                       </button>
                       <button
@@ -255,20 +193,35 @@ export function RouteOptionsPanel({
                 })}
               </div>
             </div>
-          ) : (
-            <p className="tc-route-empty">
-              Set a destination and tap Plan route to compare options.
-            </p>
-          )}
-
-          {alternatives.length > 0 ? (
-            <p className="tc-route-footnote">
-              Select a route, then tap Go or Start to enter navigation.
-            </p>
           ) : null}
         </div>
       ) : null}
     </section>
+  );
+}
+
+function Switch({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      className="tc-route-switch"
+      onClick={() => onChange(!checked)}
+    >
+      <span>{label}</span>
+      <span className="tc-route-switch-track" aria-hidden>
+        <span className="tc-route-switch-thumb" />
+      </span>
+    </button>
   );
 }
 
@@ -278,29 +231,16 @@ function routeLabel(route: CalculatedRoute, index: number): string {
   return `Option ${index + 1}`;
 }
 
-function profileHint(id: RoutingProfileId): string {
-  switch (id) {
-    case 'fastest':
-      return 'Best ETA';
-    case 'shortest':
-      return 'Least km';
-    case 'less_traffic':
-      return 'Quieter roads';
-    default:
-      return '';
-  }
-}
-
 function ProfileIcon({ id }: { id: RoutingProfileId }) {
   const common = {
     viewBox: '0 0 24 24',
     fill: 'none',
     stroke: 'currentColor',
-    strokeWidth: 1.8,
+    strokeWidth: 2,
     strokeLinecap: 'round' as const,
     strokeLinejoin: 'round' as const,
-    width: 18,
-    height: 18,
+    width: 16,
+    height: 16,
   };
 
   switch (id) {

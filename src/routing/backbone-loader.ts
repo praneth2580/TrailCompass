@@ -90,23 +90,40 @@ export async function loadBackboneNetwork(
   throwIfAborted(signal);
   const tiles = backboneTiles(points, radiusMeters);
   let done = 0;
+  // Shown until the next area arrives, so a slow server doesn't look frozen.
+  let retrying = false;
   const report = () =>
     onProgress?.({
       phase: 'downloading-roads',
-      label: `Loading major roads · ${done}/${tiles.length} areas`,
+      label: `Loading major roads · ${done}/${tiles.length} areas${retrying ? ' · map server busy, trying another' : ''}`,
       percent: Math.round((done / Math.max(1, tiles.length)) * 100),
     });
   report();
+  const onRetry = () => {
+    if (retrying) return;
+    retrying = true;
+    report();
+  };
 
   // The Overpass scheduler caps how many of these actually run at once.
-  const collections = await Promise.all(
-    tiles.map(async (tile) => {
-      const collection = await loadTile(tile, signal);
-      done += 1;
-      report();
-      return collection;
-    }),
-  );
+  let collections: NetworkFeatureCollection[];
+  try {
+    collections = await Promise.all(
+      tiles.map(async (tile) => {
+        const collection = await loadTile(tile, signal, onRetry);
+        done += 1;
+        retrying = false;
+        report();
+        return collection;
+      }),
+    );
+  } catch (e) {
+    if (signal?.aborted || !(e instanceof Error)) throw e;
+    // Loaded areas stay cached, so planning again continues from here.
+    throw new Error(
+      `Couldn't load major roads (${done} of ${tiles.length} areas): ${e.message}. Try again in a few minutes to continue.`,
+    );
+  }
   throwIfAborted(signal);
   return mergeNetworks(collections, 'OSM major roads');
 }
@@ -114,6 +131,7 @@ export async function loadBackboneNetwork(
 async function loadTile(
   tile: BackboneTile,
   signal?: AbortSignal,
+  onRetry?: () => void,
 ): Promise<NetworkFeatureCollection> {
   const cacheKey = `backbone:${TILE_CACHE_VERSION}:${tile.x}:${tile.y}`;
   const cached = memoryTiles.get(cacheKey);
@@ -139,7 +157,7 @@ async function loadTile(
       ],
       180,
     ),
-    { signal },
+    { signal, onRetry },
   );
   const collection = overpassToNetwork(
     raw,

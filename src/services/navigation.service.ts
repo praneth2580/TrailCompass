@@ -79,7 +79,7 @@ export class NavigationService {
   /** Dashed rider→destination link while a background plan is in flight. */
   private planningLink: { from: Coordinate; to: Coordinate } | null = null;
   /** Destination and stops the offered routes were planned for. */
-  private plannedTrip: string | null = null;
+  private plannedTrip: { end: Coordinate; waypoints: Coordinate[] } | null = null;
 
   constructor(adapter: RoutingAdapter = defaultRoutingAdapter) {
     this.adapter = adapter;
@@ -98,7 +98,23 @@ export class NavigationService {
    * stops. False once the trip is edited after planning.
    */
   isPlannedFor(end: Coordinate | null, waypoints: Coordinate[]): boolean {
-    return this.plannedTrip != null && this.plannedTrip === tripKey(end, waypoints);
+    return (
+      this.plannedTrip != null &&
+      tripKey(this.plannedTrip.end, this.plannedTrip.waypoints) === tripKey(end, waypoints)
+    );
+  }
+
+  /**
+   * Whether the routes on offer lead to `end`, even if stops were added or
+   * removed since. Stop suggestions and stop ordering can still follow them;
+   * a route to an earlier destination would put stops in the wrong place.
+   */
+  isPlannedTo(end: Coordinate | null): boolean {
+    return (
+      this.plannedTrip != null &&
+      end != null &&
+      tripKey(this.plannedTrip.end, []) === tripKey(end, [])
+    );
   }
 
   subscribe(listener: NavigationListener): () => void {
@@ -282,7 +298,7 @@ export class NavigationService {
     const calculated = savedToCalculatedRoute(saved);
     this.alternatives = [calculated];
     this.waypoints = [...(saved.waypoints ?? [])];
-    this.plannedTrip = tripKey(saved.end, this.waypoints);
+    this.plannedTrip = { end: saved.end, waypoints: [...this.waypoints] };
     this.setActiveRoute(calculated);
     if (saved.profile) this.profile = saved.profile;
 
@@ -418,7 +434,7 @@ export class NavigationService {
       if (!this.route) {
         throw new Error('No routes returned');
       }
-      this.plannedTrip = tripKey(end, this.waypoints);
+      this.plannedTrip = { end, waypoints: [...this.waypoints] };
       this.setActiveRoute(this.route);
 
       this.planningLink = null;
@@ -785,6 +801,8 @@ export class NavigationService {
   private arrive(): void {
     mapService.clearRoute();
     this.route = null;
+    // Otherwise getActiveCalculatedRoute() still returns the finished route.
+    this.alternatives = [];
     this.plannedTrip = null;
     this.setState({
       status: 'arrived',

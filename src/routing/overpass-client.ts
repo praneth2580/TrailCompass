@@ -4,18 +4,35 @@ import { overpassScheduler } from './overpass-scheduler';
 
 const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
-  'https://overpass.kumi.systems/api/interpreter',
+  // The two servers behind overpass-api.de. They often still answer when
+  // its front door returns 502 or 504.
+  'https://lz4.overpass-api.de/api/interpreter',
+  'https://z.overpass-api.de/api/interpreter',
   'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
 ];
 /** Give up on a mirror this long after the query's own server timeout. */
 const CLIENT_TIMEOUT_GRACE_MS = 15_000;
 const DEFAULT_CLIENT_TIMEOUT_MS = 120_000;
+/**
+ * A working server starts answering within about 40 s even for a large
+ * road area. One that has sent nothing by now never does, so stop waiting.
+ */
+const FIRST_BYTE_TIMEOUT_MS = 75_000;
+/** Skip a mirror that never answered for this long… */
+const SILENT_MIRROR_COOLDOWN_MS = 10 * 60_000;
+/** …and one that said it was busy or failed for this long. */
+const BUSY_MIRROR_COOLDOWN_MS = 60_000;
+
+/** Endpoint → time it may be tried again. Shared by every request. */
+const mirrorCooldownUntil = new Map<string, number>();
 
 /**
  * Run an Overpass QL query. One mirror at a time for a single query; the
  * scheduler may overlap a different request. On 429 / 5xx / network
  * failure or a mirror that stops answering, back off and try the next
- * mirror — never several at once.
+ * mirror — never several at once. Mirrors that just failed are skipped by
+ * later requests too, so one dead server costs a trip only once.
  */
 export async function fetchOverpass<T>(
   query: string,
@@ -24,6 +41,8 @@ export async function fetchOverpass<T>(
     signal?: AbortSignal;
     /** Interactive lookups pass fewer tries so a fallback can take over sooner. */
     maxAttempts?: number;
+    /** Called when an attempt failed and another mirror will be tried. */
+    onRetry?: () => void;
   } = {},
 ): Promise<{ elements?: T[] }> {
   const { onProgress, signal } = options;
@@ -34,17 +53,23 @@ export async function fetchOverpass<T>(
 
   for (let attemptIndex = 0; attemptIndex < maxAttempts; attemptIndex++) {
     throwIfAborted(signal);
-    const endpoint = OVERPASS_ENDPOINTS[mirror % OVERPASS_ENDPOINTS.length]!;
+    mirror = nextAvailableMirror(mirror);
+    const endpoint = OVERPASS_ENDPOINTS[mirror]!;
     const release = await overpassScheduler.acquire(signal);
     const started = performance.now();
     let backoffMs = 0;
     // Per-attempt signal: the caller's abort, or this mirror going silent.
     const attempt = new AbortController();
     let timedOut = false;
+    let silent = false;
     const timer = setTimeout(() => {
       timedOut = true;
       attempt.abort();
     }, timeoutMs);
+    const firstByteTimer = setTimeout(() => {
+      silent = true;
+      attempt.abort();
+    }, Math.min(FIRST_BYTE_TIMEOUT_MS, timeoutMs));
     const forwardAbort = () => attempt.abort();
     signal?.addEventListener('abort', forwardAbort, { once: true });
     try {
@@ -57,13 +82,16 @@ export async function fetchOverpass<T>(
         body: `data=${encodeURIComponent(query)}`,
         signal: attempt.signal,
       });
+      clearTimeout(firstByteTimer);
 
       if (isSaturatedStatus(response.status)) {
         overpassScheduler.noteSaturated();
+        coolDown(endpoint, BUSY_MIRROR_COOLDOWN_MS);
         lastError = new Error(`Overpass HTTP ${response.status}`);
         mirror += 1;
         backoffMs = retryAfterMs(response) ?? backoffDelayMs(attemptIndex);
       } else if (!response.ok) {
+        coolDown(endpoint, BUSY_MIRROR_COOLDOWN_MS);
         lastError = new Error(`Overpass HTTP ${response.status}`);
         mirror += 1;
         backoffMs = backoffDelayMs(attemptIndex);
@@ -80,6 +108,7 @@ export async function fetchOverpass<T>(
         if (parsed && isRuntimeErrorRemark(parsed.remark)) {
           // HTTP 200 with a cut-off element list: never hand it on to be cached.
           overpassScheduler.noteSaturated();
+          coolDown(endpoint, BUSY_MIRROR_COOLDOWN_MS);
           lastError = new Error(`Overpass ${parsed.remark!.trim()}`);
           mirror += 1;
           backoffMs = backoffDelayMs(attemptIndex);
@@ -90,25 +119,53 @@ export async function fetchOverpass<T>(
       }
     } catch (e) {
       if (signal?.aborted) throw abortError();
-      if (isAbortError(e) && !timedOut) throw e;
+      if (isAbortError(e) && !timedOut && !silent) throw e;
       overpassScheduler.noteSaturated();
-      lastError = timedOut
-        ? new Error('Overpass mirror timed out')
-        : e instanceof Error
-          ? e
-          : new Error('Overpass request failed');
+      // No answer at all, or no connection: likely down for a while.
+      coolDown(endpoint, silent || !timedOut ? SILENT_MIRROR_COOLDOWN_MS : BUSY_MIRROR_COOLDOWN_MS);
+      lastError = silent
+        ? new Error('Overpass mirror did not answer')
+        : timedOut
+          ? new Error('Overpass mirror timed out')
+          : e instanceof Error
+            ? e
+            : new Error('Overpass request failed');
       mirror += 1;
       backoffMs = backoffDelayMs(attemptIndex);
     } finally {
       clearTimeout(timer);
+      clearTimeout(firstByteTimer);
       signal?.removeEventListener('abort', forwardAbort);
       release();
     }
 
-    if (attemptIndex < maxAttempts - 1) await sleep(backoffMs, signal);
+    if (attemptIndex < maxAttempts - 1) {
+      options.onRetry?.();
+      await sleep(backoffMs, signal);
+    }
   }
 
   throw lastError ?? new Error('Overpass request failed');
+}
+
+/**
+ * The first mirror from `start` (in rotation) that is not cooling down,
+ * or the one that recovers soonest when all are.
+ */
+function nextAvailableMirror(start: number): number {
+  const now = Date.now();
+  let best = start % OVERPASS_ENDPOINTS.length;
+  for (let step = 0; step < OVERPASS_ENDPOINTS.length; step++) {
+    const index = (start + step) % OVERPASS_ENDPOINTS.length;
+    const until = mirrorCooldownUntil.get(OVERPASS_ENDPOINTS[index]!) ?? 0;
+    if (until <= now) return index;
+    if (until < (mirrorCooldownUntil.get(OVERPASS_ENDPOINTS[best]!) ?? 0)) best = index;
+  }
+  return best;
+}
+
+function coolDown(endpoint: string, ms: number): void {
+  mirrorCooldownUntil.set(endpoint, Date.now() + ms);
 }
 
 /** The query's `[timeout:N]` plus a grace period, or a default. */

@@ -946,6 +946,7 @@ These came up while reading the code for this guide. Each one points to the rele
 ### Fixed on 2026-10-27
 
 - **Road packs are saved on Android.** `storage-manager.ts` now writes with `recursive: true`; before, writes into the missing `road-packs/` folder failed silently.
+- **Road downloads no longer stall on a dead Overpass server.** `overpass-client.ts` also tries `lz4.` and `z.overpass-api.de`, the two servers behind overpass-api.de, which often answer when its front door returns 502. A server that sends nothing within 75 s is dropped and skipped for 10 minutes, and a busy one for 1 minute. While a retry is under way, the progress line reads "map server busy, trying another". If an area still fails, the error says how many loaded; they stay cached, so planning again continues.
 - **Overpass replies with a `runtime error` remark** (HTTP 200 with a cut-off element list) are treated as a failure and retried on the next mirror instead of being cached (`overpass-client.ts`).
 - **The screen stays on while navigating** (`hooks/useKeepAwake.ts`).
 - **Start no longer follows an out-of-date route.** If stops or the destination change after planning, Start is replaced by Plan / Preview again (`NavigationService.isPlannedFor`).

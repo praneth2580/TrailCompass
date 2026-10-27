@@ -95,13 +95,20 @@ export default function App() {
   useKeepAwake(navMode);
   const immersive = navMode || rideMode;
   const mapPickActive = itinerary.mapPick != null;
+  const tripDestination = itinerary.destination?.coordinate ?? nav.destination ?? null;
   // Stops or destination edited after the route was planned.
   const routeOutdated =
     nav.status === 'choosing' &&
     !navigationService.isPlannedFor(
-      itinerary.destination?.coordinate ?? nav.destination ?? null,
+      tripDestination,
       itinerary.stops.map((stop) => stop.coordinate),
     );
+  // The route the Plan tab suggests and orders stops along: only one that
+  // leads to this trip's destination, so a route left from an earlier
+  // destination is never used ("11 km trip, no fuel needed").
+  const tripRoute = navigationService.isPlannedTo(tripDestination)
+    ? navigationService.getActiveCalculatedRoute()
+    : null;
   const canSaveRoute =
     ((nav.alternatives?.length ?? 0) > 0 || nav.status === 'navigating') &&
     (nav.status === 'choosing' ||
@@ -787,7 +794,7 @@ export default function App() {
           <PlanScreen
             gpsCoordinate={gpsCoordinate}
             nav={nav}
-            activeRoute={navigationService.getActiveCalculatedRoute()}
+            activeRoute={tripRoute}
             engineReady={engine.ready}
             planning={planBusy || nav.status === 'planning'}
             routeOutdated={routeOutdated}
