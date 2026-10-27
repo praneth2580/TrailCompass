@@ -1596,6 +1596,26 @@ button.tc-plan-row:active {
   font-weight: 600;
 }
 
+/* App update sheet */
+.tc-update-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0.65rem 0.8rem 0.65rem 1.6rem;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--tc-text);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.tc-update-link {
+  color: var(--tc-accent);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
 .tc-sheet-actions {
   display: grid;
   grid-template-columns: 1fr 1.35fr;

@@ -13,6 +13,13 @@ import {
   type PoiManifest,
   type PoiUpdateStatus,
 } from '../services/poi-data.service';
+import {
+  checkForAppUpdate,
+  installedAppVersion,
+  showAppUpdatePrompt,
+  subscribeAppUpdates,
+  type AppUpdateStatus,
+} from '../services/app-update.service';
 
 interface OfflineScreenProps {
   engine: OfflineEngineStatus;
@@ -96,6 +103,8 @@ export function OfflineScreen({ engine }: OfflineScreenProps) {
           <p className="tc-section-copy">{engine.attribution}</p>
         ) : null}
       </section>
+
+      <AppVersionSection />
 
       <PlacesDataSection />
 
@@ -187,6 +196,79 @@ export function OfflineScreen({ engine }: OfflineScreenProps) {
       </section>
     </main>
   );
+}
+
+/** The installed version, and checking GitHub for a newer one. */
+function AppVersionSection() {
+  const [version, setVersion] = useState<string | null>(null);
+  const [status, setStatus] = useState<AppUpdateStatus>({ state: 'idle' });
+
+  useEffect(() => {
+    let alive = true;
+    void installedAppVersion().then((installed) => {
+      if (alive) setVersion(installed);
+    });
+    const off = subscribeAppUpdates(setStatus);
+    return () => {
+      alive = false;
+      off();
+    };
+  }, []);
+
+  // Web preview: there is no APK to update.
+  if (!version) return null;
+  const busy = status.state === 'checking' || status.state === 'downloading';
+
+  return (
+    <section className="tc-storage" aria-label="App version">
+      <div className="tc-storage-row">
+        <span className="tc-storage-label">TrailCompass</span>
+        <span className="tc-storage-value">v{version}</span>
+      </div>
+      <p className="tc-section-copy" role="status">
+        {appUpdateText(status)}
+      </p>
+      <button
+        type="button"
+        className="tc-btn tc-btn-ghost"
+        disabled={busy}
+        onClick={() =>
+          status.state === 'available'
+            ? showAppUpdatePrompt()
+            : void checkForAppUpdate({ force: true })
+        }
+      >
+        {status.state === 'available'
+          ? `Update to ${status.release.version}`
+          : status.state === 'checking'
+            ? 'Checking…'
+            : status.state === 'downloading'
+              ? 'Downloading…'
+              : 'Check for updates'}
+      </button>
+    </section>
+  );
+}
+
+function appUpdateText(status: AppUpdateStatus): string {
+  switch (status.state) {
+    case 'checking':
+      return 'Checking GitHub for a new version…';
+    case 'up-to-date':
+      return 'Up to date';
+    case 'available':
+      return `Version ${status.release.version} is available`;
+    case 'downloading':
+      return `Downloading version ${status.release.version}…`;
+    case 'installing':
+      return `Installing version ${status.release.version}…`;
+    case 'needs-permission':
+      return 'Allow TrailCompass to install updates to continue';
+    case 'error':
+      return status.message;
+    default:
+      return 'Checks for a new version daily when online';
+  }
 }
 
 interface PlacesData {

@@ -27,6 +27,8 @@ import { mapService } from '../services/map.service';
 import { routeLibrary } from '../services/route-library.service';
 import { voiceGuidance } from '../services/voice-guidance.service';
 import { checkForPoiUpdate } from '../services/poi-data.service';
+import { checkForAppUpdate } from '../services/app-update.service';
+import { AppUpdateSheet } from '../components/AppUpdateSheet';
 import {
   tripPlanner,
   type TripPlannerState,
@@ -51,6 +53,8 @@ import { APP_ROUTES, type AppScreen } from './routes';
 const BACK_EXIT_WINDOW_MS = 2_500;
 /** Let start-up finish before looking for newer fuel and food data. */
 const POI_UPDATE_DELAY_MS = 10_000;
+/** And for a newer app release, a little later still. */
+const APP_UPDATE_DELAY_MS = 15_000;
 
 export default function App() {
   const [screen, setScreen] = useState<AppScreen>('map');
@@ -151,6 +155,11 @@ export default function App() {
       () => void checkForPoiUpdate(),
       POI_UPDATE_DELAY_MS,
     );
+    // At most once a day; the prompt waits until no ride is in progress.
+    const appUpdate = window.setTimeout(
+      () => void checkForAppUpdate(),
+      APP_UPDATE_DELAY_MS,
+    );
     // Registering a listener replaces Android's default (leave the app).
     const backListener = CapacitorApp.addListener('backButton', () =>
       handleBackRef.current(),
@@ -167,6 +176,7 @@ export default function App() {
       unsubMap();
       window.clearInterval(tick);
       window.clearTimeout(poiUpdate);
+      window.clearTimeout(appUpdate);
       void locationService.stopWatching();
       compassService.stop();
     };
@@ -824,6 +834,9 @@ export default function App() {
       ) : screen === 'downloads' ? (
         <OfflineScreen engine={engine} />
       ) : null}
+
+      {/* Never interrupt turn-by-turn; it appears once the ride ends. */}
+      {!navMode ? <AppUpdateSheet /> : null}
 
       <nav className="tc-bottom-nav" aria-label="Main">
         {APP_ROUTES.map((route) => (
