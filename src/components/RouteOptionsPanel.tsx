@@ -200,7 +200,7 @@ export function RouteOptionsPanel({
   );
 }
 
-function Switch({
+export function Switch({
   label,
   checked,
   onChange,

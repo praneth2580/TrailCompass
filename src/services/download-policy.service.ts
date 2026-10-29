@@ -9,9 +9,9 @@ const PREFS_KEY = 'tc.downloadNetworks';
 
 /**
  * The "Wi-Fi only" download setting. On mobile data with it on, road
- * downloads for route planning wait for Wi-Fi, and fuel and food data and
- * app updates hold off. Rerouting during a ride, map tiles and searches
- * always use whatever network is up.
+ * downloads for route planning and offline maps wait for Wi-Fi, and fuel
+ * and food data and app updates hold off. Rerouting during a ride, map
+ * tiles for the screen and searches always use whatever network is up.
  */
 export class DownloadPolicyService {
   private setting: DownloadNetworks = readSetting();

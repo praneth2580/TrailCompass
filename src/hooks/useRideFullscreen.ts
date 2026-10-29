@@ -3,10 +3,18 @@ import type { GpsFix, NavigationStatus } from '../types/navigation';
 
 /** Enter ride view once sustained motion is detected (~12 km/h). */
 const ENTER_MPS = 3.5;
-/** Leave ride view after sustained near-stop (~4 km/h). */
-const EXIT_MPS = 1.2;
+/** At or below this (~5 km/h) the rider counts as stopped; clears GPS jitter. */
+const STOPPED_MPS = 1.5;
 const ENTER_HOLD_MS = 2200;
-const EXIT_HOLD_MS = 4500;
+/** How long the rider must stay stopped before ride view closes. */
+const EXIT_HOLD_MS = 5000;
+/**
+ * GPS goes quiet at a standstill (Android throttles a still phone), which
+ * would leave the last moving speed in place. No fix for this long, or for
+ * twice the usual gap between fixes, counts as stopped.
+ */
+const STALE_FIX_MS = 8000;
+const STALE_FIX_MAX_MS = 30_000;
 
 interface RideFullscreenInput {
   status: NavigationStatus;
@@ -30,9 +38,15 @@ export function useRideFullscreen({
   const enterSince = useRef<number | null>(null);
   const exitSince = useRef<number | null>(null);
   const speedRef = useRef<number | null>(null);
+  const fixAt = useRef<number | null>(null);
+  const fixGapMs = useRef(0);
 
   useEffect(() => {
-    speedRef.current = fix?.speedMps ?? null;
+    if (!fix) return;
+    const now = Date.now();
+    if (fixAt.current != null) fixGapMs.current = now - fixAt.current;
+    fixAt.current = now;
+    speedRef.current = fix.speedMps;
   }, [fix]);
 
   useEffect(() => {
@@ -47,8 +61,13 @@ export function useRideFullscreen({
     }
 
     const tick = () => {
-      const speed = speedRef.current;
       const now = Date.now();
+      const staleAfter = Math.max(
+        STALE_FIX_MS,
+        Math.min(2 * fixGapMs.current, STALE_FIX_MAX_MS),
+      );
+      const stale = fixAt.current != null && now - fixAt.current > staleAfter;
+      const speed = stale ? 0 : speedRef.current;
 
       if (speed != null && speed >= ENTER_MPS) {
         exitSince.current = null;
@@ -62,7 +81,8 @@ export function useRideFullscreen({
 
       enterSince.current = null;
 
-      if (speed == null || speed > EXIT_MPS) {
+      // Unknown speed counts as stopped: devices drop it once motion ends.
+      if (speed != null && speed > STOPPED_MPS) {
         exitSince.current = null;
         return;
       }

@@ -2000,6 +2000,42 @@ button.tc-plan-point-row[aria-expanded='true'] {
   opacity: 0.6;
 }
 
+/* A checkbox with a title and a hint line. */
+.tc-sheet-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.6rem 0.7rem;
+  border-radius: 12px;
+  border: 1px solid var(--tc-border);
+  background: rgba(255, 255, 255, 0.03);
+  cursor: pointer;
+}
+
+.tc-sheet-check input {
+  width: 1.2rem;
+  height: 1.2rem;
+  margin: 0.1rem 0 0;
+  flex-shrink: 0;
+  accent-color: var(--tc-accent);
+}
+
+.tc-sheet-check > span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.tc-sheet-check strong {
+  font-size: 0.9rem;
+}
+
+.tc-sheet-check > span > span {
+  color: var(--tc-muted);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
 .tc-sheet-error {
   margin: 0;
   color: var(--tc-danger);
@@ -2201,6 +2237,7 @@ button.tc-plan-point-row[aria-expanded='true'] {
 
 .tc-trip {
   display: flex;
+  flex-wrap: wrap;
   align-items: stretch;
   border-radius: var(--tc-radius);
   border: 1px solid var(--tc-border);
@@ -2271,6 +2308,68 @@ button.tc-plan-point-row[aria-expanded='true'] {
   fill: #0b1712;
   stroke: #f5a623;
   stroke-width: 2.4;
+}
+
+/* Offline map status along the bottom of a trip card. */
+.tc-trip-map {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.6rem;
+  padding: 0.3rem 0.45rem 0.3rem 0.85rem;
+  border-top: 1px solid var(--tc-border);
+  color: var(--tc-muted);
+  font-size: 0.78rem;
+}
+
+.tc-trip-map[data-tone='ok'] {
+  color: var(--tc-ok);
+}
+
+.tc-trip-map[data-tone='err'] {
+  color: var(--tc-danger);
+}
+
+.tc-trip-map > span[role='status'] {
+  flex: 1;
+  min-width: 0;
+}
+
+.tc-trip-map button {
+  flex-shrink: 0;
+  min-height: 2.2rem;
+  padding: 0 0.85rem;
+  border-radius: 999px;
+  border: 1px solid var(--tc-border-strong);
+  background: var(--tc-accent-soft);
+  color: var(--tc-accent);
+  font-family: var(--tc-font-display);
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.tc-trip-map button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.tc-trip-map-bar {
+  flex-basis: 100%;
+  height: 3px;
+  margin: 0 0 0.2rem;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.tc-trip-map-bar span {
+  display: block;
+  height: 100%;
+  background: var(--tc-accent);
+  transition: width 200ms ease;
 }
 
 .tc-trip-text {
@@ -2613,7 +2712,8 @@ button.tc-plan-point-row[aria-expanded='true'] {
   color: var(--tc-danger);
 }
 
-.tc-offline-downloads .tc-download-networks {
+.tc-offline-downloads .tc-download-networks,
+.tc-offline-overlays .tc-route-switches {
   margin-bottom: 0.65rem;
 }
 
@@ -2907,6 +3007,176 @@ button.tc-plan-point-row[aria-expanded='true'] {
 .tc-offline-icon-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+/* Offline maps: areas and trips, each with its status along the bottom. */
+.tc-offline-add-area {
+  align-self: flex-start;
+}
+
+.tc-offline-status-err {
+  color: var(--tc-danger);
+}
+
+.tc-offline-packs.tc-offline-maps {
+  gap: 0.5rem;
+  padding: 0;
+}
+
+.tc-offline-map {
+  flex-wrap: wrap;
+  padding-bottom: 0;
+  overflow: hidden;
+}
+
+.tc-offline-map .tc-trip-map {
+  margin: 0.3rem -0.35rem 0 -0.8rem;
+}
+
+.tc-offline-map-kind {
+  display: grid;
+  place-items: center;
+  width: 2.2rem;
+  height: 2.2rem;
+  flex-shrink: 0;
+  border-radius: 10px;
+  background: var(--tc-accent-soft);
+  color: var(--tc-accent);
+}
+
+.tc-offline-map-kind[data-kind='route'] {
+  background: rgba(91, 141, 239, 0.14);
+  color: #7aa5f5;
+}
+
+.tc-offline-icon-btn-plain:active:not(:disabled) {
+  background: var(--tc-accent-soft);
+  color: var(--tc-accent);
+}
+
+/* Location: GPS modes as a list of choices. */
+.tc-choice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.tc-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  width: 100%;
+  padding: 0.7rem 0.8rem;
+  border-radius: var(--tc-radius-sm);
+  border: 1px solid var(--tc-border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--tc-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.tc-choice[aria-checked='true'] {
+  border-color: var(--tc-accent);
+  background: var(--tc-accent-soft);
+}
+
+.tc-choice-mark {
+  flex-shrink: 0;
+  width: 1.1rem;
+  height: 1.1rem;
+  margin-top: 0.1rem;
+  border-radius: 50%;
+  border: 2px solid var(--tc-muted);
+}
+
+.tc-choice[aria-checked='true'] .tc-choice-mark {
+  border-color: var(--tc-accent);
+  box-shadow: inset 0 0 0 3px var(--tc-bg-elevated), inset 0 0 0 10px var(--tc-accent);
+}
+
+.tc-choice-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.tc-choice-text strong {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.tc-choice-text span {
+  color: var(--tc-muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.tc-offline-location .tc-offline-notice {
+  margin: 0.6rem 0 0;
+}
+
+.tc-offline-location .tc-offline-notice .tc-offline-link {
+  min-height: 0;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.tc-offline-location .tc-offline-hint {
+  margin-top: 0.6rem;
+}
+
+.tc-route-switches.tc-location-switches {
+  grid-template-columns: 1fr;
+  margin-top: 0.75rem;
+}
+
+/* Save an area: the picked area and how much of it fits. */
+.tc-area-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.85rem 0.95rem;
+  border-radius: var(--tc-radius-sm);
+  border: 1px solid var(--tc-border);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.tc-area-plan > strong {
+  font-family: var(--tc-font-display);
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.tc-area-plan > span {
+  color: var(--tc-muted);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.tc-area-plan-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0.35rem 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.86rem;
+}
+
+.tc-area-plan-facts b {
+  color: var(--tc-accent);
+  font-weight: 700;
+}
+
+.tc-area-plan-note {
+  margin: 0.25rem 0 0;
+  padding: 0.55rem 0.7rem;
+  border-radius: var(--tc-radius-sm);
+  background: var(--tc-accent-soft);
+  color: var(--tc-accent);
+  font-size: 0.8rem;
+  line-height: 1.4;
 }
 
 /* How routing works: folded away at the bottom. */
@@ -3509,6 +3779,240 @@ button.tc-plan-point-row[aria-expanded='true'] {
   background-size: 20px 20px !important;
   /* MapLibre icons are dark; invert for our dark chrome */
   filter: invert(1) brightness(1.15);
+}
+
+/* Map overlays: the show/hide-all button and the popup for a tapped place. */
+/* Under the locate button (or where it would be). */
+.tc-locate-btn.tc-poi-btn {
+  top: calc(var(--tc-pad) + var(--tc-safe-top) + 9.5rem + 44px + 10px);
+  color: var(--tc-muted);
+}
+
+.tc-locate-btn.tc-poi-btn[aria-pressed='true'] {
+  color: #3dbea5;
+}
+
+/* Ride recording: the record button under the layers button, the REC chip and the sheet. */
+.tc-locate-btn.tc-rec-btn {
+  top: calc(var(--tc-pad) + var(--tc-safe-top) + 9.5rem + 2 * (44px + 10px));
+  color: var(--tc-muted);
+}
+
+.tc-locate-btn.tc-rec-btn[data-state='recording'] {
+  color: #ff5a5f;
+  border-color: rgba(255, 90, 95, 0.55);
+}
+
+.tc-locate-btn.tc-rec-btn[data-state='paused'] {
+  color: var(--tc-accent);
+}
+
+.tc-rec-btn[data-state='recording'] .tc-rec-btn-dot {
+  animation: tc-rec-pulse 1.6s ease-in-out infinite;
+}
+
+.tc-rec-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  align-self: flex-start;
+  max-width: 100%;
+  min-height: 2.25rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 90, 95, 0.5);
+  background: var(--tc-panel);
+  color: var(--tc-text);
+  backdrop-filter: blur(14px);
+  box-shadow: var(--tc-shadow);
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tc-rec-chip[data-state='paused'] {
+  border-color: var(--tc-border-strong);
+}
+
+.tc-rec-chip-label {
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+  color: #ff5a5f;
+}
+
+.tc-rec-chip[data-state='paused'] .tc-rec-chip-label {
+  color: var(--tc-accent);
+}
+
+.tc-rec-chip-value {
+  font-family: var(--tc-font-mono);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tc-rec-dot {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ff5a5f;
+}
+
+.tc-rec-dot[data-state='recording'] {
+  animation: tc-rec-pulse 1.6s ease-in-out infinite;
+}
+
+.tc-rec-dot[data-state='paused'] {
+  background: var(--tc-accent);
+}
+
+@keyframes tc-rec-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tc-rec-dot[data-state='recording'],
+  .tc-rec-btn[data-state='recording'] .tc-rec-btn-dot {
+    animation: none;
+  }
+}
+
+.tc-ride-view-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  align-self: flex-start;
+  max-width: 100%;
+  min-height: 2.25rem;
+  padding: 0.2rem 0.25rem 0.2rem 0.75rem;
+  border-radius: 999px;
+  border: 1px solid rgba(178, 141, 255, 0.55);
+  background: var(--tc-panel);
+  backdrop-filter: blur(14px);
+  box-shadow: var(--tc-shadow);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.tc-ride-view-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tc-ride-view-chip button {
+  display: grid;
+  place-items: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--tc-muted);
+  cursor: pointer;
+}
+
+.tc-sheet-title .tc-rec-dot {
+  margin-right: 0.5rem;
+  vertical-align: 0.12em;
+}
+
+.tc-ride-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.tc-ride-stats > div {
+  padding: 0.65rem 0.7rem;
+  border-radius: var(--tc-radius-sm);
+  border: 1px solid var(--tc-border);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.tc-ride-stats dt {
+  color: var(--tc-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tc-ride-stats dd {
+  margin: 0.3rem 0 0;
+  font-family: var(--tc-font-mono);
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.tc-ride-discard {
+  align-self: center;
+}
+
+.tc-library-tabs {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  flex-shrink: 0;
+}
+
+.tc-poi-popup .maplibregl-popup-content {
+  padding: 0.7rem 2rem 0.7rem 0.8rem;
+  border-radius: 12px;
+  border: 1px solid var(--tc-border);
+  background: var(--tc-panel-solid);
+  color: var(--tc-text);
+  box-shadow: var(--tc-shadow);
+  font-family: var(--tc-font-body);
+}
+
+.tc-poi-popup .maplibregl-popup-tip {
+  border-top-color: var(--tc-panel-solid) !important;
+  border-bottom-color: var(--tc-panel-solid) !important;
+}
+
+.tc-poi-popup .maplibregl-popup-close-button {
+  width: 2rem;
+  height: 2rem;
+  color: var(--tc-muted);
+  font-size: 1.2rem;
+}
+
+.tc-poi-popup-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.tc-poi-popup-body strong {
+  font-family: var(--tc-font-display);
+  font-size: 0.95rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.tc-poi-popup-body > span {
+  color: var(--tc-muted);
+  font-size: 0.75rem;
+}
+
+.tc-poi-popup-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+
+.tc-btn.tc-btn-sm {
+  min-height: 2.4rem;
+  min-width: 0;
+  padding: 0.35rem 0.8rem;
+  font-size: 0.85rem;
 }
 
 /* ── Narrow phones ──────────────────────────────────────── */

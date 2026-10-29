@@ -9,6 +9,8 @@ const config: CapacitorConfig = {
   },
   android: {
     allowMixedContent: false,
+    // OpenFreeMap asks apps that save maps offline to name themselves.
+    appendUserAgent: 'TrailCompass',
   },
   plugins: {
     Geolocation: {

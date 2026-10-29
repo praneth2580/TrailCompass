@@ -20,7 +20,7 @@ It describes the working tree as of **2026-10-23** (app version `1.1.0`, Android
 8. [Routing subsystem (`src/routing`)](#8-routing-subsystem)
 9. [Navigation lifecycle end to end](#9-navigation-lifecycle-end-to-end)
 10. [Persistence (`src/database`, storage keys)](#10-persistence)
-11. [Offline map subsystem (`src/offline`) — stubs](#11-offline-map-subsystem)
+11. [Offline maps (`src/offline`)](#11-offline-maps)
 12. [Types (`src/types`)](#12-types)
 13. [Hooks (`src/hooks`)](#13-hooks)
 14. [Styling (`src/index.css`)](#14-styling)
@@ -50,14 +50,15 @@ TrailCompass is an Android navigation app for motorcycle touring. It is a React 
 
 | Capability | Status |
 |---|---|
-| Map display | Works. Uses **online** tiles (OpenFreeMap). |
-| Offline map tiles (PMTiles) | Not built. Interfaces exist; the bridge is a stub. |
+| Map display | Works. OpenFreeMap tiles, from a saved offline map when it has them. Fuel and food places shown on the map. |
+| Offline map tiles (PMTiles) | Works for saved trips and for areas (a city, district or state). Tiles are stored once in a shared store and travel in shared files (§11). |
 | GPS and compass | Work. |
 | Route calculation | Works. Runs on the phone (A\*), but downloads road data from Overpass unless it is already cached. |
 | Valhalla WASM routing | Optional. Turns on only if a tile archive is bundled. None is shipped. |
 | Turn-by-turn and rerouting | Works, with known accuracy limits (see §19). |
-| Region map downloads | Stub. Always ends in an error state. |
-| Trip history | A repository exists but nothing uses it. |
+| Area map downloads | Works: **Save an area** in the Offline tab (§11). The older region stubs (`region-manager.ts`) are not used. |
+| Ride log | Works. Rides record from the map or while navigating, also with the screen off or the app closed (Android), and are kept with their track and stats (§7.1). |
+| GPS modes | Works. Satellites only, satellites + mobile data & Wi-Fi, or battery saver (§7.1). |
 
 ---
 
@@ -69,9 +70,9 @@ TrailCompass is an Android navigation app for motorcycle touring. It is a React 
 | Build | Vite 8 | `base: './'` so asset paths resolve inside the Android WebView. Source maps are on. |
 | Lint | oxlint | `.oxlintrc.json`: react, typescript and oxc plugins; rules-of-hooks is an error. |
 | Tests | Vitest 4 | Unit tests for the routing code, next to it as `src/routing/*.test.ts`. Node environment. |
-| Native shell | Capacitor 7 | Plugins: Geolocation, Filesystem, Preferences, Share, App (back button), Keep Awake, Text-to-Speech. |
+| Native shell | Capacitor 7 | Plugins: Geolocation (permission), Filesystem, Preferences, Share, App (back button), Keep Awake, Text-to-Speech, and the app's own (§16). |
 | Map | MapLibre GL JS 6 | Vector style from OpenFreeMap. The worker URL is set explicitly for Vite. |
-| Tiles (future) | `pmtiles` 4 | Installed, but not used yet. |
+| Offline tiles | `pmtiles` 4 | Reads the offline maps; `offline/pmtiles-writer.ts` writes them. |
 | Routing (optional) | `@jansoft/mbujkanji-valhalla-wasm` | Loaded with a dynamic import, only if tiles exist. |
 | Road data | Overpass API (OSM) | Downloaded per route corridor and turned into a graph in memory. |
 | Geocoding | Nominatim (OSM) | Free-text place search. |
@@ -100,7 +101,7 @@ trailcompass/
 │   ├── services/               Singletons: location, compass, map, navigation, trip, search…
 │   ├── routing/                Routing engine, OSM loader, geometry, file format
 │   ├── database/               JSON key-value repositories on Capacitor Preferences
-│   ├── offline/                Map-package plumbing (mostly stubs)
+│   ├── offline/                Offline maps: tile store, PMTiles, tile planning, tcmap://
 │   ├── hooks/                  useRideFullscreen, useKeepAwake, useBackHandler
 │   └── types/                  Shared domain types
 │
@@ -316,7 +317,14 @@ A manual list of fuel or food places, with two scopes:
 ### 6.3 Library tab
 
 #### `LibraryScreen.tsx`
-A header plus `SavedRoutesPanel`. `onPlanTrip` takes the rider to the Plan tab from an empty library.
+A header and **Trips** / **Rides** tabs: `SavedRoutesPanel` or `RideLogPanel`. `onPlanTrip` takes the rider to the Plan tab from an empty library; `onShowRide` opens the map with a ride drawn on it.
+
+#### `RideLogPanel.tsx`
+- Lists recorded rides, newest first, with a thumbnail of the track (`TrackThumbnail.tsx`, shared with trips), distance, moving time, average and top speed, climb, when, and the GPS mode used.
+- Tapping a ride shows it on the map. **Export GPX**, **Save as trip** (its path becomes a trip without turn instructions) and **Delete** (with **Undo**) are icon buttons.
+
+#### `RideSheet.tsx`
+- Opened from the map's record button or REC chip while a ride records: distance, time recording and average speed, with Pause/Resume, Finish ride, and Discard (asks first).
 
 #### `SavedRoutesPanel.tsx`
 - Lists saved trips, newest `updatedAt` first. Each card shows a thumbnail of the route's shape (start, stops and end), distance, time, stops, route type and when it was saved (`formatSavedAt` in `route-naming.ts`).
@@ -333,9 +341,11 @@ Top to bottom:
 - **On this phone:** the road data saved, as a total and a bar split by kind (major roads, route corridors, local streets), and the fuel and food places built in.
 - **Downloads:** the Wi-Fi only setting (`download-policy.service.ts`), with the network the phone is on.
 - **Updates:** a row each for the app and the fuel and food data, with status, progress and a Check button.
+- **Offline maps** (`OfflineMapsList.tsx`): areas and trips with their detail, size, download time and status; **Update** (or **Resume**, **Retry**, **Stop**), share and delete on each; **Save an area** (`SaveAreaSheet.tsx`) and **Import** above the list. The heading shows what all maps take up, shared tiles counted once.
+- **Map:** the fuel and restaurant overlay switches.
+- **Location:** the GPS mode (with satellites in use, and a "Turn it on" link when the phone's location is off) and **Record rides while navigating**.
 - **Saved road data** (`RoadDataList.tsx`): packs grouped by kind (`ROAD_PACK_KINDS` in `road-pack.service.ts`), titled by their main road names (stored on new packs as `roads`) or else their middle point. Each has a delete button; **Delete all** asks first.
 - **How routing works:** folded away; the engine, its status and Valhalla. Then the data credits.
-- It does **not** download map regions. That flow is still a stub (§11).
 
 ### 6.5 Unused component
 
@@ -347,10 +357,20 @@ Top to bottom:
 
 ### 7.1 `location.service.ts` — GPS
 
-- `startWatching()`: checks and requests location permission through Capacitor, then calls `Geolocation.watchPosition({ enableHighAccuracy: true, timeout: 20 s, maximumAge: 5 s })`. Each position becomes a `GpsFix`. If the Capacitor plugin throws **on the web**, it falls back to `navigator.geolocation.watchPosition`.
+- `startWatching()` (one start however many callers): checks and requests location permission through `@capacitor/geolocation`. On Android it then watches `RideLocationPlugin` in the chosen GPS mode; in a browser it calls `Geolocation.watchPosition({ enableHighAccuracy, timeout: 20 s, maximumAge: 5 s })`, falling back to `navigator.geolocation.watchPosition` if the plugin throws. Each position becomes a `GpsFix` (with `satellites` on Android).
+- **GPS mode** (`getSource`, `setSource`, `subscribeSource`; localStorage `tc.locationSource`; `LOCATION_SOURCES` for the settings): `gps` uses Android's GPS provider only (no data, no Google services, a slower first fix), `assisted` (the default) the GPS and network providers with the GPS preferred while it has a fix in the last 10 s, `saver` the network provider every 5 s. In a browser only `saver` changes anything (`enableHighAccuracy: false`). `status()` says whether the phone's GPS and network location are on and how many satellites the last fix used; `openLocationSettings()` opens Android's location settings. Native side: `LocationHub.java`, `RideLocationPlugin.java`.
 - `ensureFix(timeoutMs = 8 s)`: returns a fix that is fresh (≤ 15 s old) or recent (≤ 60 s old) straight away. Otherwise it waits for the next fix. It rejects early if permission is denied. Used by Plan → Preview.
 - `subscribe(listener)`: sends the last fix right away if one exists.
 - Helpers: `isFixStale` (older than 15 s), `formatAccuracy` (`±12 m`), and `formatGpsChipLabel`, which turns browser error strings into short chip labels (Permission denied, Unavailable, Timed out, Needs HTTPS, Acquiring…).
+
+### 7.1a `ride-log.service.ts` — the ride log
+
+- `start()`, `pause()`, `resume()`, `finish()` (resolves with the kept ride, or null under 50 m), `discard()`. `getLive()` and `activeSeconds()` for the REC chip and the ride sheet; `subscribeSaved` for the "Saved …" toast.
+- **Recorders.** Android: `RideRecorderService.java`, a `location` foreground service (`stopWithTask="false"`, so it carries on when the app is swiped away; `START_STICKY`) writes `map-packages/rides/<id>.csv` (`time,lat,lon,accuracy,altitude,speed,bearing,satellites`, and `#pause`, `#resume`, `#end` lines), keeps its state in SharedPreferences `trailcompass-ride` and shows distance and a running clock in a notification with Pause/Resume and Finish. `init()` picks up a ride under way, or keeps one finished from the notification while the app was closed. Browser: the page records its own fixes, saved every 15 s (localStorage `tc.webRide`, `rides/<id>.csv`).
+- **Auto record** (localStorage `tc.autoRecordRides`, default on): navigation starting records a ride named after the trip's destination; arriving or stopping finishes it. Rides started by hand aren't finished by navigation.
+- **Track maths** (`ride-track.ts`, tests in `ride-track.test.ts`): `DistanceCounter` (the native notification uses the same rule), `summarizeTrack`, Douglas–Peucker `simplify` (3 m), `encodeTrack`/`decodeTrack` (polyline-style numbers for positions, seconds and heights), `toGpx`, `rideName` ("Morning ride"…).
+- **Storage** (`database/ride-repository.ts`): summaries in Preferences `ride-index`, `ride:<id>`; tracks in `map-packages/rides/<id>.json`.
+- **Map:** the ride being recorded draws as a red line, a past ride from Library as a purple one (`mapService.setRideLine`), with a chip to hide it.
 
 ### 7.2 `compass.service.ts` — heading
 
@@ -364,9 +384,10 @@ Top to bottom:
 
 Wraps every map operation so the UI never touches MapLibre directly.
 
-- **Setup:** calls `setWorkerUrl` with the worker URL from Vite's `?url` import, so the bundled worker loads. Style: `https://tiles.openfreemap.org/styles/liberty`. Starts with a world view (zoom 1.5). The first GPS fix zooms to 15.
+- **Setup:** calls `setWorkerUrl` with the worker URL from Vite's `?url` import, so the bundled worker loads. Style: `buildMapStyle()`, the bundled copy of OpenFreeMap's Liberty style read through the `tcmap://` protocol (§11). Starts with a world view (zoom 1.5). The first GPS fix zooms to 15.
 - **Status:** `subscribeStatus` reports `{ok, message}`. It is ok after `load`, and an error if the style fails before loading.
-- **Clicks:** a tap is first checked against the route layers with `queryRenderedFeatures`. If it hits a route alternative, `routePick` listeners fire. Otherwise `click` listeners get the coordinate.
+- **Clicks:** a tap on a fuel or food icon (14 px of slack) opens a popup with its name and the buttons `setPoiActions` allows (**Go here**, **Add stop**, or **Use this place** while the Plan tab waits for a tap); they fire `poiAction` listeners. Otherwise the tap is checked against the route layers. If it hits a route alternative, `routePick` listeners fire. Otherwise `click` listeners get the coordinate.
+- **Fuel & food layer:** `trailcompass-pois` holds the bundled Overture places in view (`bundledPoisInBounds`, loaded on `moveend`). Fuel shows from zoom 10, food from 13, names from 15. Where the bundled data has no tiles (outside India), OSM's `fuel`, `restaurant`, `fast_food` and `cafe` places from the vector tiles show instead. Liberty's own icons for those classes are filtered out so nothing doubles up. Fuel and restaurants are separate overlays (`MAP_OVERLAYS`), switched on and off in the Offline tab's **Map** section (`setOverlay`). The layers button under "my location" shows or hides every overlay at once (`setOverlaysShown`). Both are remembered in localStorage `tc.mapOverlays`.
 - **Camera follow:** user drag, zoom, rotate or pitch gestures (events with `originalEvent`) turn follow off and notify `cameraBreak` listeners.
 - **Markers:** the position marker (dot, or arrow rotated to the heading), a destination pin (orange), and stop pins (fuel teal **F**, food coral **E**, custom violet **+**).
 - **Route layers**, bottom to top:
@@ -380,7 +401,6 @@ Wraps every map operation so the UI never touches MapLibre directly.
   | `…route` | orange `#F5A623`, 5 px | The selected route. While recalculating it becomes faded, dashed and dark amber. |
 
 - Key methods: `drawRoute`, `drawAlternatives(routes, selected, showAll)`, `drawGhostRoute`, `drawRecalcLink`, `setRouteRecalculating`, `fitRoute`, `centerOn`, `resumeNavigationFollow`, `setDestination`, `setItineraryStops`, `clearRoute`, `clearItinerary`.
-- Stubs: `switchToRegion` always returns "not implemented". `registerTileProtocol()` is called with no arguments, so it does nothing.
 
 ### 7.4 `navigation.service.ts` — the navigation orchestrator
 
@@ -786,7 +806,7 @@ A JSON key-value wrapper over **Capacitor Preferences** (SharedPreferences on An
 | Repository | Keys | Used? |
 |---|---|---|
 | `RouteRepository` (`route-repository.ts`) | `route-index` (ID array), `route:<id>` | Yes, by the route library. `saveRoute` updates `updatedAt`. Lists newest first. |
-| `TripRepository` (`trip-repository.ts`) | `trip-index`, `trip:<id>` | **No.** It is ready for recording trip history. |
+| `RideRepository` (`ride-repository.ts`) | `ride-index`, `ride:<id>`; tracks in `map-packages/rides/<id>.json` | Yes: the ride log. |
 
 ### 10.3 Where everything is stored
 
@@ -796,24 +816,39 @@ A JSON key-value wrapper over **Capacitor Preferences** (SharedPreferences on An
 | Road pack metadata | Preferences `trailcompass:road-pack-*` | localStorage |
 | Road pack bodies | `Directory.Data/map-packages/road-packs/<id>.json` | localStorage `trailcompass:file:road-packs/<id>.json` |
 | Region catalogue (stub) | `Directory.Data/map-packages/regions.json` | localStorage `trailcompass:file:regions.json` |
+| Offline maps (trips and areas) | Preferences `trailcompass:offline-maps` | localStorage (through Preferences) |
+| Map tiles (the tile store) | `Directory.Data/map-packages/tiles/<time>-<id>.pmtiles` | IndexedDB `trailcompass-map-files` |
+| Map fonts and icons | `Directory.Data/map-packages/assets/` | IndexedDB `trailcompass-map-files` |
 | Shared route files (temporary) | `Directory.Cache/shared-routes/` | Downloaded through the browser |
+| Shared map files (temporary) | `Directory.Cache/shared-maps/` | Downloaded through the browser |
 | Stop-suggestion settings | localStorage `tc.tankRangeKm`, `tc.departTime`, `tc.mealKinds` | same |
 | Itinerary and navigation state | **Memory only.** Lost when the app restarts. | same |
 
 ---
 
-## 11. Offline map subsystem
+## 11. Offline maps
 
-These files define the interfaces for downloadable map regions. **None of it is connected to the UI yet.**
+A saved trip keeps the map along its route, and an area (a city, district or state) can be saved from the Offline tab. Both are lists of tiles; the tiles themselves are kept once, in the tile store. Everything the map loads goes through the `tcmap://` protocol, so saved tiles are used automatically, online or not.
 
-| File | What it does today |
+| File | What it does |
 |---|---|
-| `tile-protocol.ts` | `registerTileProtocol(addProtocol?, handler?)` registers a `pmtiles://` protocol only when both arguments are given. `map.service` calls it with none, so it does nothing. `buildPmtilesStyleUrl` builds a `pmtiles://` URL. |
-| `region-manager.ts` | A region catalogue (stored in `regions.json`) with `listRegions`, `upsertRegion` (checked first), `startDownload`, `pauseDownload`, `cancelDownload`, `deleteRegion`, and `onProgress`. `startDownload` **always** ends in an error: "Download not implemented — provide a lawful regional package source." |
-| `package-validator.ts` | Checks region metadata: ID, name, a valid `[w, s, e, n]` bounding box, size, attribution, licence, schema version. The comment says checksum checks are not done yet. |
-| `storage-manager.ts` | A Filesystem wrapper rooted at `map-packages/` (`Directory.Data`), with a `localStorage` fallback on the web. Reads and writes text files and deletes files. `getStorageInfo().freeBytes` is always `null`. |
+| `tile-protocol.ts` | Registers `tcmap://` with MapLibre. `tcmap://tiles/z/x/y`: the tile store's copy (`readOfflineTile`), else OpenFreeMap. Offline, a missing tile errors and MapLibre keeps stretching the lower zoom it has. `tcmap://fonts/…` and `tcmap://sprites/…`: from `map-packages/assets/` when kept, else downloaded and kept. `tcmap://ne2/…`: the low-zoom relief, online only. `buildMapStyle()` rewrites the bundled `liberty-style.json` to use these. `planetTilesTemplate()` reads OpenFreeMap's current planet build from its TileJSON and remembers it in localStorage `tc.ofmPlanetTiles`. `prefetchMapAssets()` saves the icons and the font ranges for Latin, Indian scripts and Urdu. |
+| `tile-plan.ts` | `planRouteTiles(route)`: every tile of the route's area (+10 km) up to zoom 8, then bands along the road up to zoom 14 (30 km wide at zoom 9 down to ±2.5 km at zoom 14). Narrower bands are tried until it fits OpenFreeMap's 3,000-tile limit. `planAreaTiles(area)`: every tile touching the area's outline (`areaTiles`: the tiles its edges cross plus those inside, row by row), zoom by zoom up to the closest zoom that fits the limit. A city keeps zoom 14; Maharashtra stops at zoom 11. |
+| `tile-store.ts` | The tile store: every saved tile once, in PMTiles files ("segments") under `map-packages/tiles/`, each tile with its download time and OpenFreeMap build (`trailcompass.times` in the file's metadata, tiles grouped by time). `init` reads every segment's directories into an index; a file the app closed mid-write is deleted. `writer()` writes new segments of up to 500 tiles or 8 MB, so a download cut short keeps what arrived. A tile saved again keeps the newer download (equal times: the later file). `collect(live)` forgets tiles no map lists, deletes files nothing uses and rewrites files over half garbage (at least 1 MB). `encodeTileIds`/`decodeTileIds` store tile lists compactly (sorted delta varints, base64). |
+| `pmtiles-writer.ts` | Writes PMTiles v3. Tile data is appended as it arrives; the header and root directory go in the first 16 KiB at the end, with leaf directories when the root wouldn't fit. Identical tiles are stored once. `readArchive` lists every tile entry of a file with its metadata; `readRanges` reads many byte ranges in a few large reads. |
+| `pack-files.ts` | Binary files. Android: `Directory.Data/map-packages/`, appended in 1 MB batches through Filesystem, with `readRange` and `writeAt` from `MapFilesPlugin.java` (the web view's local server ignores where a Range starts); share files go to `Directory.Cache/shared-maps/`. Web: Blobs in IndexedDB `trailcompass-map-files`; share files are Blobs to download. |
+| `services/map-pack.service.ts` | Offline maps: `route:<route id>` and `area:<OpenStreetMap id>` records in Preferences `trailcompass:offline-maps`, each with its tile list, `downloadedAt` and OpenFreeMap build. `downloadRoute(route)`, `downloadArea(area)` and `update(id)` queue a download: one at a time, 4 tiles at a time, gzipped, skipping tiles already saved from the current build, stopping at 48 MB (the map then keeps the tiles that arrived, `trimmed`); waits for Wi-Fi with that setting. Each tile gets 3 attempts of up to 30 s; a tile that still fails is tried again once the rest are in (the progress shows `retrying`), and if it fails again the download ends with "N map tiles didn't download" and Retry fetches only those. Eight failures in a row, or the phone going offline, stop it as a lost connection. `buildShareFile(id, route?)` writes the map's tiles to a share file. `openSharedFile` and `importSharedFile` merge one in (below). `pruneOrphans`: at start-up, removes maps of deleted trips (so Undo keeps the map). Tiles are collected once nothing is downloading, importing or sharing. Maps saved in the older one-file-per-trip format are deleted at start-up. |
+| `services/place-search.service.ts` | `searchAreas(query)`: Nominatim with `layer=address` and outlines simplified to about 500 m, for **Save an area**. |
+| `region-manager.ts`, `package-validator.ts` | The earlier region-download stubs, not connected. |
+| `storage-manager.ts` | A Filesystem wrapper rooted at `map-packages/` (`Directory.Data`), with a `localStorage` fallback on the web, for text files (road packs). |
 
-Design note for the future offline maps: a WebView cannot read local PMTiles files on its own; it needs a range-request bridge or a native plugin. Check local file access, memory use and app restarts on the target Android version before building large region downloads. PMTiles files contain map tiles, not routing data.
+**When maps download.** Saving a trip with **Offline map** ticked (the default) downloads its map in the background; Library shows the progress, with Stop, Retry and Resume. Trips saved without one show **Save map**. Sharing with **Offline map** ticked downloads the map first (only what the store lacks), with progress and Cancel, then deletes the map when the sheet closes; tiles other maps use stay. **Save an area** shows the detail that fits and how many of its tiles the phone already has, then downloads in the background. **Update** fetches a map's missing tiles and those from an older OpenFreeMap build.
+
+**Share file.** `<name>.trailcompass.pmtiles` is a standard PMTiles archive (MVT, gzip, OpenMapTiles schema) with the map's saved tiles. Its metadata has `trailcompass: {format: "trailcompass-map", version: 2, pack, route?, times}`: `pack` is the map's record without `createdAt` (its tile list included), `route` the `.trailcompass.json` envelope (§8.12) for a trip, and `times` each tile's download time and build. Import recognises it by name or by the `PMTiles` magic bytes. The file picker also offers `application/octet-stream`, because Android lists only file types it knows.
+
+**Import.** A shared file joins what's on the phone as if downloaded there. The trip is the same trip as one with its id: the copy with the later `updatedAt` is kept, with its own dates (`saveImported`). The map's record is replaced when the file's `downloadedAt` is later. Each tile the map lists is taken when the phone lacks it or holds an older download; the rest are skipped. Nothing is saved twice, and importing the same file again changes nothing.
+
+**Limits.** OpenFreeMap allows offline downloads of at most 3,000 tiles or 50 MB, 4 requests at a time, from an app with its own User-Agent (`appendUserAgent: 'TrailCompass'`). A long trip or a big area loses street detail first; save a city inside a state for its streets. Downloads run in the web view and stop if the app is closed; **Resume** carries on.
 
 ---
 
@@ -873,11 +908,11 @@ Turns on an immersive map view automatically once the bike is clearly moving dur
 
 ### 16.1 Android project (`android/`)
 
-- Generated by Capacitor. `MainActivity` extends `BridgeActivity` and registers the app's own plugins: `AppUpdaterPlugin` (in-app updates) and `DownloadsPlugin` (background planning and network type).
+- Generated by Capacitor. `MainActivity` extends `BridgeActivity` and registers the app's own plugins: `AppUpdaterPlugin` (in-app updates), `DownloadsPlugin` (background planning and network type), `MapFilesPlugin` (byte ranges of offline map files) and `RideLocationPlugin` (the chosen GPS mode and ride recording).
 - `applicationId` / `namespace`: `com.example.trailcompass`. **This is a placeholder and must change before publishing.**
 - `minSdk 23`, `compileSdk` and `targetSdk 35`. `release.mjs` bumps `versionCode` and `versionName`.
-- Permissions: `INTERNET`, `ACCESS_COARSE_LOCATION`, `ACCESS_FINE_LOCATION`, `REQUEST_INSTALL_PACKAGES`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_DATA_SYNC`, `POST_NOTIFICATIONS` and `ACCESS_NETWORK_STATE`.
-- `DownloadService` is a `dataSync` foreground service that runs only while a route plans in the background. There is **no** background-location permission or location service, so GPS updates can still stop when the screen turns off or the app goes to the background.
+- Permissions: `INTERNET`, `ACCESS_COARSE_LOCATION`, `ACCESS_FINE_LOCATION`, `REQUEST_INSTALL_PACKAGES`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_DATA_SYNC`, `FOREGROUND_SERVICE_LOCATION`, `POST_NOTIFICATIONS` and `ACCESS_NETWORK_STATE`.
+- `DownloadService` is a `dataSync` foreground service that runs only while a route plans in the background. `RideRecorderService` is a `location` foreground service that runs while a ride records; it is started from the app on screen, so it needs no background-location permission. Without a ride recording, GPS updates stop when the app goes to the background.
 - A `FileProvider` (`${applicationId}.fileprovider`, `res/xml/file_paths.xml`) lets the Share plugin send exported route files.
 - `capacitor.config.ts`: `webDir: 'dist'`, `androidScheme: 'https'` (needed for geolocation, which requires a secure context), `allowMixedContent: false`.
 
@@ -916,18 +951,21 @@ Turns on an immersive map view automatically once the bike is clearly moving dur
 
 | Feature | Network needed? | Service |
 |---|---|---|
-| Basemap tiles | **Always** | OpenFreeMap |
+| Basemap tiles | **No** along saved trips and in saved areas; elsewhere yes | OpenFreeMap |
 | UI fonts | First load (falls back to system fonts) | Google Fonts |
 | Road data for routing | **Yes, unless** the area is in the memory cache or a road pack, or Valhalla tiles are bundled. With Downloads set to Wi-Fi only, planning waits for Wi-Fi; rerouting mid-ride never waits | Overpass (5 mirrors) |
 | Place search | Yes | Nominatim |
 | Fuel and food POIs, stop suggestions | No for India (bundled Overture tiles); live results added where those are few | Nominatim, then Overpass |
+| Fuel and food on the map | No for India (bundled); elsewhere from the map tiles | OpenFreeMap |
+| Offline map downloads | Yes, once per trip or area (updates fetch only newer builds); waits for Wi-Fi with that setting | OpenFreeMap |
+| Area search | Yes | Nominatim |
 | Fuel and food data updates | Optional; checked daily, the app keeps working on its current copy | GitHub Pages |
-| GPS position and compass | No | Device |
+| GPS position and compass | No, in Satellites only mode. The default mode uses mobile data and Wi-Fi when there are some, for a quicker fix; Battery saver needs them | Device (network location: the phone's provider) |
 | A\* routing on cached roads, follow loop, arrival | No | On the phone |
 | Rerouting | Only if the new corridor is not cached | Overpass |
 | Saved routes: open, save, share | No (sharing uses the system share sheet) | On the phone |
 
-So today the app runs routing on the phone, but it is **not** a fully offline app. The project's acceptance test (airplane mode) will not pass until the PMTiles bridge and pre-downloaded road data are in place.
+So a saved trip runs without signal: its roads, its map and the fuel and food data are on the phone. Planning a new trip, and the map away from saved trips, still need a network.
 
 ---
 
@@ -936,14 +974,11 @@ So today the app runs routing on the phone, but it is **not** a fully offline ap
 | Item | Location | Status |
 |---|---|---|
 | `buildDirectRoute`, `routeLengthOk` | `routing/direct-route.ts` | Not imported anywhere |
-| `TripRepository` | `database/trip-repository.ts` | Not used |
-| `RegionManager`, `validateRegionPackage`, `DownloadProgress` | `offline/`, `components/` | Not connected to the UI. Download always errors. |
-| `registerTileProtocol` | `offline/tile-protocol.ts` | Called with no arguments, so it does nothing |
+| `RegionManager`, `validateRegionPackage`, `DownloadProgress` | `offline/`, `components/` | Not connected to the UI. Area downloads use `map-pack.service.ts` instead. |
 | `navigationService.pause()` / `resume()` | `navigation.service.ts` | No UI calls them |
 | `resolveScreen` | `app/routes.tsx` | Not called |
 | GeoJSON export (`kind: 'geojson'`) | `route-library.service.ts` | No UI offers it |
-| `MapLibreAdapter.switchToRegion`, `fitBounds`, `alternativeColor` | `map.service.ts` | Stub or not called |
-| `pmtiles` dependency | `package.json` | Not imported |
+| `MapLibreAdapter.fitBounds`, `alternativeColor` | `map.service.ts` | Not called |
 
 ---
 
@@ -992,7 +1027,7 @@ Each fix below is covered by tests in `src/routing/*.test.ts` (`npm test`).
 
 1. **Valhalla ignores the route type** and always returns a single route, using `motorcycle` costing.
 2. **On Android the compass likely shows relative, not magnetic, heading.** The service listens only to `deviceorientation`. Chrome and WebView provide true-north readings on `deviceorientationabsolute` ([compass.service.ts:76](../src/services/compass.service.ts#L76)).
-3. **There is no background location.** The only foreground service runs while a route plans in the background; there is none for riding and no background-location permission, so the WebView may stop receiving GPS updates when the screen locks.
+3. **Background location only while a ride records.** `RideRecorderService` keeps the GPS running with the screen off (and, with auto record on, whenever you navigate), and fixes keep reaching the web view. Whether turn-by-turn and voice prompts keep going with the screen locked hasn't been checked on a phone. Without a ride recording, updates stop in the background.
 4. **Trip and navigation state is lost on restart.** Only saved routes and road packs survive.
 5. **`sharp` is not a declared dependency.** `generate-icons.mjs` needs it, but today it is installed only indirectly (through `@jansoft/mbujkanji-valhalla-wasm` → `next`). Add it to `devDependencies`.
 6. **`release.mjs` needs `android/app/src/main/res/xml/config.xml`, which is gitignored.** It exists only after a `cap sync`, so a fresh clone fails at the version-bump step. The script also supports a token embedded in the `origin` URL, which means storing a credential in `.git/config`.
@@ -1042,5 +1077,6 @@ npm run icons:generate
 | Add a stop type or change the Plan tab | `types/trip-stop.ts`, `services/trip-planner.service.ts`, `components/PlanScreen.tsx` |
 | Change fuel or food suggestion rules | `services/stop-suggest.service.ts` |
 | Change the saved-route file format | `routing/route-file.ts` (increment `ROUTE_FILE_VERSION`) |
-| Add offline map tiles | `offline/tile-protocol.ts`, `offline/region-manager.ts`, `services/map.service.ts` |
+| Change offline map coverage or limits | `offline/tile-plan.ts`, `services/map-pack.service.ts` |
+| Change the fuel & food map layer | `services/map.service.ts` (`ensurePoiLayers`, `refreshPois`) |
 | Add a new tab | `app/routes.tsx`, `App.tsx` (screen switch and `NavIcon`) |

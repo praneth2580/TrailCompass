@@ -11,6 +11,8 @@ export class CompassService {
   private listening = false;
   private smoothed: number | null = null;
   private readonly alpha = 0.2;
+  private eventName: 'deviceorientationabsolute' | 'deviceorientation' =
+    'deviceorientation';
 
   subscribe(listener: CompassListener): () => void {
     this.listeners.add(listener);
@@ -42,7 +44,14 @@ export class CompassService {
       return;
     }
 
-    window.addEventListener('deviceorientation', this.onOrientation, true);
+    // Chromium (incl. Android WebView) reports plain `deviceorientation`
+    // relative to where the phone started; the absolute event is north-based.
+    // iOS lacks it but adds webkitCompassHeading to the plain event.
+    this.eventName =
+      'ondeviceorientationabsolute' in window
+        ? 'deviceorientationabsolute'
+        : 'deviceorientation';
+    window.addEventListener(this.eventName, this.onOrientation, true);
     this.listening = true;
 
     // Emit an initial status so UI is not blank while waiting for first event.
@@ -57,7 +66,7 @@ export class CompassService {
 
   stop(): void {
     if (!this.listening) return;
-    window.removeEventListener('deviceorientation', this.onOrientation, true);
+    window.removeEventListener(this.eventName, this.onOrientation, true);
     this.listening = false;
     this.smoothed = null;
   }

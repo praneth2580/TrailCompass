@@ -4,28 +4,33 @@ import {
   Map as MapLibreMap,
   Marker,
   NavigationControl,
+  Popup,
   setWorkerUrl,
   type PaddingOptions,
 } from 'maplibre-gl';
+import type { Feature } from 'geojson';
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 import type { Coordinate } from '../routing/routing-adapter';
-import { registerTileProtocol } from '../offline/tile-protocol';
+import {
+  buildMapStyle,
+  FOOD_CLASSES,
+  FUEL_CLASSES,
+  registerTileProtocol,
+} from '../offline/tile-protocol';
+import { mapPackService } from './map-pack.service';
+import { bundledPoisInBounds } from './bundled-pois.service';
 
 // Vite does not place MapLibre's worker next to the optimized dependency.
 // Point at the packaged worker before any map is created.
 setWorkerUrl(maplibreWorkerUrl);
 
 /**
- * Live online basemap. OpenFreeMap publishes this MapLibre style for app use
- * with no API key. Tiles are OpenStreetMap data via OpenMapTiles.
- * A network connection is required. This is not an offline package — the
- * local PMTiles bridge is still pending (see offline/tile-protocol.ts).
+ * Basemap: OpenFreeMap's Liberty style (OpenStreetMap data via
+ * OpenMapTiles), no API key. Tiles come from a saved route's offline map
+ * when it has them, else from the network (see offline/tile-protocol.ts).
  */
-export const ONLINE_MAP_STYLE_URL =
-  'https://tiles.openfreemap.org/styles/liberty';
-
-export const ONLINE_MAP_STYLE_NOTE =
-  'Online map (OpenFreeMap) — needs a network connection';
+export const MAP_STYLE_NOTE =
+  'Map by OpenFreeMap — saved trips keep their map offline';
 
 /** Zoom applied on the first GPS fix so the world view becomes a street view. */
 const INITIAL_FOLLOW_ZOOM = 15;
@@ -47,7 +52,6 @@ export interface MapAdapter {
   fitRoute(coordinates: Coordinate[], padding?: number | PaddingOptions): void;
   drawRoute(coordinates: Coordinate[], routeIndex?: number): void;
   clearRoute(): void;
-  switchToRegion(_regionId: string): Promise<{ ok: boolean; message: string }>;
   reportMapDataStatus(): MapDataStatus;
   dispose(): void;
 }
@@ -63,6 +67,56 @@ const ALT_LAYER = 'trailcompass-route-alts-line';
 const ALT_HIT_LAYER = 'trailcompass-route-alts-hit';
 
 const ALT_COLORS = ['#5b8def', '#9b7bff', '#3dbea5'];
+
+/** A ride being recorded, and a past ride opened from the ride log. */
+export type RideLineKind = 'live' | 'view';
+const RIDE_LINES: Record<RideLineKind, { source: string; layer: string; color: string }> = {
+  live: { source: 'trailcompass-ride-live', layer: 'trailcompass-ride-live-line', color: '#ff5a5f' },
+  view: { source: 'trailcompass-ride-view', layer: 'trailcompass-ride-view-line', color: '#b28dff' },
+};
+
+const POI_SOURCE = 'trailcompass-pois';
+/** Bundled Overture places (India), then OpenStreetMap's from the tiles elsewhere. */
+const POI_LAYERS = {
+  fuel: 'trailcompass-poi-fuel',
+  food: 'trailcompass-poi-food',
+  osmFuel: 'trailcompass-poi-osm-fuel',
+  osmFood: 'trailcompass-poi-osm-food',
+} as const;
+/** Fuel shows from further out than food; places to eat are far denser. */
+const POI_MIN_ZOOM = { fuel: 10, food: 13 };
+const POI_LABEL_ZOOM = 15;
+const POI_COLORS = { fuel: '#3dbea5', food: '#e07a5f' };
+const OVERLAY_PREF_KEY = 'tc.mapOverlays';
+/** Before overlays could be picked one by one: '0' hid the fuel & food layer. */
+const OLD_POI_PREF_KEY = 'tc.mapPois';
+
+/** Places the map can draw over the basemap; each is switched on in settings. */
+export type MapOverlay = 'fuel' | 'food';
+
+export const MAP_OVERLAYS: Array<{ id: MapOverlay; label: string }> = [
+  { id: 'fuel', label: 'Fuel stations' },
+  { id: 'food', label: 'Restaurants' },
+];
+
+/** `shown` is the map's show/hide-all button; the rest are the settings. */
+export type MapOverlaySettings = { shown: boolean } & Record<MapOverlay, boolean>;
+
+/** Go here; add as a stop on the trip; or answer the Plan tab's "tap to place" request. */
+export type PoiAction = 'destination' | 'stop' | 'pick';
+
+const POI_ACTION_LABELS: Record<PoiAction, string> = {
+  destination: 'Go here',
+  stop: 'Add stop',
+  pick: 'Use this place',
+};
+
+export interface MapPoi {
+  name: string;
+  kind: 'fuel' | 'food';
+  coordinate: Coordinate;
+  source: string;
+}
 
 /** Navigation chevron; tip points toward heading (0° = north). */
 const POSITION_ARROW_HTML = `
@@ -88,12 +142,20 @@ export class MapLibreAdapter implements MapAdapter {
   private routePickListeners = new Set<(index: number) => void>();
   private cameraBreakListeners = new Set<() => void>();
   private statusListeners = new Set<(status: MapDataStatus) => void>();
+  private poiActionListeners = new Set<(poi: MapPoi, action: PoiAction) => void>();
+  private poiActions: PoiAction[] = [];
+  private overlays = readOverlayPreference();
+  private overlayListeners = new Set<() => void>();
+  private poiPopup: Popup | null = null;
+  private poiPopupKind: MapOverlay | null = null;
+  private poiToken = 0;
+  private rideLines: Record<RideLineKind, Coordinate[][] | null> = { live: null, view: null };
   private followCamera = true;
   /** False while another tab covers the (still mounted) map. */
   private visible = true;
   private status: MapDataStatus = {
     ok: false,
-    message: 'Loading online map…',
+    message: 'Loading map…',
   };
 
   subscribeStatus(listener: (status: MapDataStatus) => void): () => void {
@@ -109,13 +171,15 @@ export class MapLibreAdapter implements MapAdapter {
 
     this.framedToPosition = false;
     this.styleLoaded = false;
-    this.setStatus({ ok: false, message: 'Loading online map…' });
+    this.setStatus({ ok: false, message: 'Loading map…' });
 
     registerTileProtocol();
+    // Saved offline maps join the tile lookup as soon as they're listed.
+    void mapPackService.init();
 
     const map = new MapLibreMap({
       container,
-      style: ONLINE_MAP_STYLE_URL,
+      style: buildMapStyle(),
       center: [0, 20],
       zoom: 1.5,
       attributionControl: { compact: true },
@@ -127,8 +191,15 @@ export class MapLibreAdapter implements MapAdapter {
       if (this.map !== map) return;
       this.styleLoaded = true;
       this.ensureRouteLayer(map);
+      this.ensurePoiLayers(map);
+      void this.refreshPois();
+      this.drawRideLines(map);
       // Listeners redraw anything that was skipped while the style loaded.
-      this.setStatus({ ok: true, message: ONLINE_MAP_STYLE_NOTE });
+      this.setStatus({ ok: true, message: MAP_STYLE_NOTE });
+    });
+
+    map.on('moveend', () => {
+      if (this.map === map) void this.refreshPois();
     });
 
     map.on('error', (event) => {
@@ -137,12 +208,19 @@ export class MapLibreAdapter implements MapAdapter {
         event.error instanceof Error ? event.error.message : 'network error';
       this.setStatus({
         ok: false,
-        message: `Online map failed to load (${detail}). Check the network connection.`,
+        message: `Map failed to load (${detail}). Check the network connection.`,
       });
     });
 
     map.on('click', (event) => {
       if (this.map !== map) return;
+
+      // A fuel station or place to eat: show what it is.
+      const poi = this.poiAt(map, event.point);
+      if (poi) {
+        this.showPoiPopup(map, poi);
+        return;
+      }
 
       // Prefer picking an existing route alternative when the tap hits one.
       const layers = [ALT_HIT_LAYER, ALT_LAYER, ROUTE_LAYER].filter((id) =>
@@ -574,12 +652,96 @@ export class MapLibreAdapter implements MapAdapter {
     this.clearItineraryStops();
   }
 
-  async switchToRegion(_regionId: string): Promise<{ ok: boolean; message: string }> {
-    return {
-      ok: false,
-      message:
-        'Region switch unavailable — offline map packages and local tile bridge not implemented yet',
-    };
+  /** A recorded track, split where the ride was paused; null removes it. */
+  setRideLine(kind: RideLineKind, lines: Coordinate[][] | null): void {
+    this.rideLines[kind] = lines && lines.some((line) => line.length > 1) ? lines : null;
+    if (this.map && this.styleLoaded) this.drawRideLines(this.map);
+  }
+
+  private drawRideLines(map: MapLibreMap): void {
+    for (const kind of ['view', 'live'] as const) {
+      const { source, layer, color } = RIDE_LINES[kind];
+      if (!map.getSource(source)) {
+        map.addSource(source, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+        map.addLayer(
+          {
+            id: layer,
+            type: 'line',
+            source,
+            layout: { 'line-cap': 'round', 'line-join': 'round' },
+            paint: { 'line-color': color, 'line-width': 4, 'line-opacity': 0.9 },
+          },
+          // Under the planned route.
+          map.getLayer(GHOST_LAYER) ? GHOST_LAYER : undefined,
+        );
+      }
+      const data = map.getSource(source);
+      if (data instanceof GeoJSONSource) {
+        const lines = this.rideLines[kind] ?? [];
+        data.setData({
+          type: 'FeatureCollection',
+          features: lines
+            .filter((line) => line.length > 1)
+            .map((line) => ({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: line } })),
+        });
+      }
+    }
+  }
+
+  /** Taps on a popup's "Go here" / "Add stop". */
+  subscribePoiAction(listener: (poi: MapPoi, action: PoiAction) => void): () => void {
+    this.poiActionListeners.add(listener);
+    return () => this.poiActionListeners.delete(listener);
+  }
+
+  /** Which buttons a fuel or food popup offers (none mid-ride). */
+  setPoiActions(actions: PoiAction[]): void {
+    this.poiActions = actions;
+  }
+
+  getOverlays(): MapOverlaySettings {
+    return this.overlays;
+  }
+
+  /** Whether any overlay is on the map right now. */
+  overlaysOnMap(): boolean {
+    return this.overlays.shown && MAP_OVERLAYS.some(({ id }) => this.overlays[id]);
+  }
+
+  /**
+   * The map's show/hide-all button. Showing with every overlay switched
+   * off in settings switches them all on, so the button always does something.
+   */
+  setOverlaysShown(shown: boolean): void {
+    const none = !MAP_OVERLAYS.some(({ id }) => this.overlays[id]);
+    const all = Object.fromEntries(MAP_OVERLAYS.map(({ id }) => [id, true]));
+    this.updateOverlays({ shown, ...(shown && none ? all : {}) });
+  }
+
+  /** One overlay's setting; switching one on also shows the overlays. */
+  setOverlay(overlay: MapOverlay, on: boolean): void {
+    this.updateOverlays({ [overlay]: on, ...(on ? { shown: true } : {}) });
+  }
+
+  subscribeOverlays(listener: () => void): () => void {
+    this.overlayListeners.add(listener);
+    return () => this.overlayListeners.delete(listener);
+  }
+
+  private updateOverlays(change: Partial<MapOverlaySettings>): void {
+    this.overlays = { ...this.overlays, ...change };
+    try {
+      localStorage.setItem(OVERLAY_PREF_KEY, JSON.stringify(this.overlays));
+    } catch {
+      // Kept for this session.
+    }
+    if (this.poiPopupKind && !this.overlayOn(this.poiPopupKind)) this.poiPopup?.remove();
+    void this.refreshPois();
+    for (const listener of [...this.overlayListeners]) listener();
+  }
+
+  private overlayOn(overlay: MapOverlay): boolean {
+    return this.overlays.shown && this.overlays[overlay];
   }
 
   reportMapDataStatus(): MapDataStatus {
@@ -596,6 +758,8 @@ export class MapLibreAdapter implements MapAdapter {
     this.clearItineraryStops();
     this.clickListeners.clear();
     this.routePickListeners.clear();
+    this.poiPopup?.remove();
+    this.poiPopup = null;
     this.framedToPosition = false;
     this.styleLoaded = false;
     this.map?.remove();
@@ -693,6 +857,165 @@ export class MapLibreAdapter implements MapAdapter {
     return true;
   }
 
+  private ensurePoiLayers(map: MapLibreMap): void {
+    if (map.getSource(POI_SOURCE)) return;
+    for (const kind of ['fuel', 'food'] as const) {
+      if (!map.hasImage(poiIconName(kind))) {
+        map.addImage(poiIconName(kind), drawPoiIcon(kind), { pixelRatio: 2 });
+      }
+    }
+    map.addSource(POI_SOURCE, {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] },
+    });
+    const layout = (name: unknown, kind: 'fuel' | 'food') => ({
+      'icon-image': poiIconName(kind),
+      'icon-size': ['interpolate', ['linear'], ['zoom'], 12, 0.75, 15, 1],
+      'icon-padding': 4,
+      'icon-allow-overlap': false,
+      'symbol-sort-key': ['case', ['==', name, ''], 1, 0],
+      'text-field': ['step', ['zoom'], '', POI_LABEL_ZOOM, name],
+      'text-font': ['Noto Sans Regular'],
+      'text-size': 11,
+      'text-offset': [0, 1.1],
+      'text-anchor': 'top',
+      'text-max-width': 8,
+      'text-optional': true,
+    });
+    const paint = {
+      'text-color': '#3b3b3b',
+      'text-halo-color': '#ffffff',
+      'text-halo-width': 1.2,
+    };
+    const osmName = ['coalesce', ['get', 'name:latin'], ['get', 'name'], ''];
+    const layers = [
+      { id: POI_LAYERS.osmFood, kind: 'food', source: 'openmaptiles', classes: FOOD_CLASSES },
+      { id: POI_LAYERS.osmFuel, kind: 'fuel', source: 'openmaptiles', classes: FUEL_CLASSES },
+      { id: POI_LAYERS.food, kind: 'food', source: POI_SOURCE },
+      { id: POI_LAYERS.fuel, kind: 'fuel', source: POI_SOURCE },
+    ] as const;
+    for (const layer of layers) {
+      const osm = 'classes' in layer;
+      if (osm && !map.getSource('openmaptiles')) continue;
+      map.addLayer({
+        id: layer.id,
+        type: 'symbol',
+        source: layer.source,
+        ...(osm ? { 'source-layer': 'poi' } : {}),
+        minzoom: POI_MIN_ZOOM[layer.kind],
+        filter: osm
+          ? ['match', ['get', 'class'], [...layer.classes], true, false]
+          : ['==', ['get', 'kind'], layer.kind],
+        layout: {
+          ...layout(osm ? osmName : ['get', 'name'], layer.kind),
+          visibility: 'none',
+        },
+        paint,
+      } as unknown as Parameters<MapLibreMap['addLayer']>[0]);
+    }
+  }
+
+  /** Loads the bundled places for the view and picks which layers show. */
+  private async refreshPois(): Promise<void> {
+    const map = this.map;
+    if (!map || !this.styleLoaded || !map.getSource(POI_SOURCE)) return;
+    const token = ++this.poiToken;
+    const zoom = map.getZoom();
+    const kinds = MAP_OVERLAYS.map(({ id }) => id).filter(
+      (kind) => this.overlayOn(kind) && zoom >= POI_MIN_ZOOM[kind],
+    );
+    let covered = false;
+    let features: Feature[] = [];
+    if (kinds.length > 0) {
+      const b = map.getBounds();
+      const bbox: [number, number, number, number] = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()];
+      const results = await Promise.all(kinds.map((kind) => bundledPoisInBounds(kind, bbox)));
+      if (token !== this.poiToken || this.map !== map) return;
+      covered = results.some((result) => result.covered);
+      features = results.flatMap((result) =>
+        result.places.map((place) => ({
+          type: 'Feature' as const,
+          properties: { name: place.name, kind: place.kind, source: 'Overture Maps' },
+          geometry: { type: 'Point' as const, coordinates: place.coordinate },
+        })),
+      );
+    }
+    const source = map.getSource(POI_SOURCE);
+    if (source instanceof GeoJSONSource) {
+      source.setData({ type: 'FeatureCollection', features });
+    }
+    const visibility = (on: boolean) => (on ? 'visible' : 'none');
+    const layers = [
+      { id: POI_LAYERS.fuel, on: this.overlayOn('fuel') },
+      { id: POI_LAYERS.food, on: this.overlayOn('food') },
+      // Where the bundled data covers the view, OSM's (fewer) places would only double up.
+      { id: POI_LAYERS.osmFuel, on: this.overlayOn('fuel') && !covered },
+      { id: POI_LAYERS.osmFood, on: this.overlayOn('food') && !covered },
+    ];
+    for (const { id, on } of layers) {
+      if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', visibility(on));
+    }
+  }
+
+  private poiAt(map: MapLibreMap, point: { x: number; y: number }): MapPoi | null {
+    const layers = Object.values(POI_LAYERS).filter(
+      (id) => map.getLayer(id) && map.getLayoutProperty(id, 'visibility') === 'visible',
+    );
+    if (layers.length === 0) return null;
+    // A fingertip is bigger than the icon.
+    const pad = 14;
+    const hit = map.queryRenderedFeatures(
+      [
+        [point.x - pad, point.y - pad],
+        [point.x + pad, point.y + pad],
+      ],
+      { layers },
+    )[0];
+    if (!hit || hit.geometry.type !== 'Point') return null;
+    const props = hit.properties ?? {};
+    const osm = hit.layer.id === POI_LAYERS.osmFuel || hit.layer.id === POI_LAYERS.osmFood;
+    const kind: MapPoi['kind'] =
+      hit.layer.id === POI_LAYERS.fuel || hit.layer.id === POI_LAYERS.osmFuel ? 'fuel' : 'food';
+    const name = String((osm ? props['name:latin'] ?? props.name : props.name) ?? '').trim();
+    const [lon, lat] = hit.geometry.coordinates as [number, number];
+    return {
+      name: name || (kind === 'fuel' ? 'Fuel station' : 'Place to eat'),
+      kind,
+      coordinate: [lon, lat],
+      source: osm ? 'OpenStreetMap' : String(props.source ?? 'Overture Maps'),
+    };
+  }
+
+  private showPoiPopup(map: MapLibreMap, poi: MapPoi): void {
+    this.poiPopup?.remove();
+    const el = document.createElement('div');
+    el.className = 'tc-poi-popup-body';
+    const title = document.createElement('strong');
+    title.textContent = poi.name;
+    const sub = document.createElement('span');
+    sub.textContent = `${poi.kind === 'fuel' ? 'Fuel station' : 'Place to eat'} · ${poi.source}`;
+    el.append(title, sub);
+    const popup = new Popup({ closeButton: true, offset: 14, className: 'tc-poi-popup', maxWidth: '240px' });
+    if (this.poiActions.length > 0) {
+      const actions = document.createElement('div');
+      actions.className = 'tc-poi-popup-actions';
+      for (const action of this.poiActions) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = action === 'stop' ? 'tc-btn tc-btn-sm tc-btn-secondary' : 'tc-btn tc-btn-sm';
+        button.textContent = POI_ACTION_LABELS[action];
+        button.addEventListener('click', () => {
+          popup.remove();
+          for (const listener of this.poiActionListeners) listener(poi, action);
+        });
+        actions.append(button);
+      }
+      el.append(actions);
+    }
+    this.poiPopupKind = poi.kind;
+    this.poiPopup = popup.setLngLat(poi.coordinate).setDOMContent(el).addTo(map);
+  }
+
   private setStatus(status: MapDataStatus): void {
     this.status = status;
     for (const listener of this.statusListeners) listener(status);
@@ -741,6 +1064,61 @@ function createStopPinElement(
     </svg>
   `;
   return el;
+}
+
+function readOverlayPreference(): MapOverlaySettings {
+  const settings: MapOverlaySettings = { shown: true, fuel: true, food: true };
+  try {
+    const saved = JSON.parse(localStorage.getItem(OVERLAY_PREF_KEY) ?? 'null') as unknown;
+    if (saved && typeof saved === 'object') {
+      for (const key of Object.keys(settings) as Array<keyof MapOverlaySettings>) {
+        const value = (saved as Record<string, unknown>)[key];
+        if (typeof value === 'boolean') settings[key] = value;
+      }
+    } else if (localStorage.getItem(OLD_POI_PREF_KEY) === '0') {
+      settings.shown = false;
+    }
+  } catch {
+    // Defaults.
+  }
+  return settings;
+}
+
+function poiIconName(kind: 'fuel' | 'food'): string {
+  return `tc-poi-${kind}`;
+}
+
+/** Glyphs on a 24-unit grid, stroked white on the pin's colour. */
+export const POI_GLYPHS = {
+  fuel: 'M6 20V5.5A1.5 1.5 0 0 1 7.5 4h5A1.5 1.5 0 0 1 14 5.5V20M4.5 20h11M8 7.5h4v3H8zM14 11h1.5a1.5 1.5 0 0 1 1.5 1.5v3a1.5 1.5 0 0 0 3 0V9l-2.5-2.5',
+  food: 'M8 3.5v6M5.5 3.5v4a2.5 2.5 0 0 0 5 0v-4M8 9.5V20.5M17 20.5V3.5c-2 1.2-3 3.6-3 7.5h3',
+};
+
+/** A 24 px round badge (48 px drawn, for sharp icons on 2x screens). */
+function drawPoiIcon(kind: 'fuel' | 'food'): ImageData {
+  const size = 48;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  ctx.beginPath();
+  ctx.arc(size / 2, size / 2, size / 2 - 3, 0, Math.PI * 2);
+  ctx.fillStyle = POI_COLORS[kind];
+  ctx.fill();
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = '#1a1205';
+  ctx.stroke();
+  ctx.save();
+  const scale = 1.25;
+  ctx.translate(size / 2 - 12 * scale, size / 2 - 12 * scale);
+  ctx.scale(scale, scale);
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.stroke(new Path2D(POI_GLYPHS[kind]));
+  ctx.restore();
+  return ctx.getImageData(0, 0, size, size);
 }
 
 export const mapService = new MapLibreAdapter();

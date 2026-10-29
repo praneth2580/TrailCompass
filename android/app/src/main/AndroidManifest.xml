@@ -40,6 +40,13 @@
             android:exported="false"
             android:foregroundServiceType="dataSync"
             android:stopWithTask="true" />
+
+        <!-- Records a ride with the screen off or the app closed (RideRecorderService). -->
+        <service
+            android:name=".RideRecorderService"
+            android:exported="false"
+            android:foregroundServiceType="location"
+            android:stopWithTask="false" />
     </application>
 
     <!-- Permissions -->
@@ -52,6 +59,8 @@
     <!-- Route planning in the background: a foreground service and its notification. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Ride recording: the GPS keeps running in a foreground service. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Wi-Fi or mobile data, for the "Wi-Fi only" download setting. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />

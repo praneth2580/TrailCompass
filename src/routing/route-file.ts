@@ -137,7 +137,8 @@ function normalizeSavedRoute(route: SavedRoute): SavedRoute {
     id: route.id || crypto.randomUUID(),
     name: route.name || 'Imported route',
     createdAt: route.createdAt || now,
-    updatedAt: now,
+    // Kept, so an import can tell which copy of a trip is newer.
+    updatedAt: validDate(route.updatedAt) ?? validDate(route.createdAt) ?? now,
     start: route.start ?? coords[0]!,
     end: route.end ?? coords[coords.length - 1]!,
     waypoints: Array.isArray(route.waypoints) ? route.waypoints : [],
@@ -149,6 +150,10 @@ function normalizeSavedRoute(route: SavedRoute): SavedRoute {
     label: route.label,
     ...(placesFor(route) ? { places: placesFor(route) } : {}),
   };
+}
+
+function validDate(value: unknown): string | undefined {
+  return typeof value === 'string' && !Number.isNaN(Date.parse(value)) ? value : undefined;
 }
 
 /** Stop names from a file, only if they match its stops; else none. */

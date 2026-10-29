@@ -23,8 +23,18 @@ import {
 } from '../services/location.service';
 import { compassService } from '../services/compass.service';
 import { navigationService } from '../services/navigation.service';
-import { mapService } from '../services/map.service';
+import {
+  mapService,
+  type MapPoi,
+  type PoiAction,
+} from '../services/map.service';
 import { routeLibrary } from '../services/route-library.service';
+import { mapPackService, routePackId } from '../services/map-pack.service';
+import { rideLogService, type LiveRide } from '../services/ride-log.service';
+import type { RideRecord } from '../database/ride-repository';
+import { RideSheet } from '../components/RideSheet';
+import { formatClock } from '../routing/route-naming';
+import type { LibraryTab } from '../components/LibraryScreen';
 import { voiceGuidance } from '../services/voice-guidance.service';
 import { checkForPoiUpdate } from '../services/poi-data.service';
 import { checkForAppUpdate } from '../services/app-update.service';
@@ -42,7 +52,7 @@ import {
 import type { CalculatedRoute, Coordinate } from '../routing/routing-adapter';
 import type { CompassReading, GpsFix, NavigationState } from '../types/navigation';
 import type { SavedPlaces, SavedRoute } from '../types/route';
-import type { StopKind } from '../types/trip-stop';
+import { createTripStop, type StopKind } from '../types/trip-stop';
 import {
   setBrowserFullscreen,
   useRideFullscreen,
@@ -108,6 +118,14 @@ export default function App() {
   const [sheetMode, setSheetMode] = useState<SaveShareMode | null>(null);
   const [sheetBusy, setSheetBusy] = useState(false);
   const [sheetError, setSheetError] = useState<string | null>(null);
+  const [sheetProgress, setSheetProgress] = useState<string | null>(null);
+  /** The route whose map the share sheet is downloading, so Cancel can stop it. */
+  const sheetMapRoute = useRef<string | null>(null);
+  /**
+   * One id per open share sheet, so trying again after dismissing the
+   * system share sheet reuses the map already downloaded.
+   */
+  const shareRouteId = useRef<string | null>(null);
   const [itinerary, setItinerary] = useState<TripPlannerState>(
     tripPlanner.getState(),
   );
@@ -116,10 +134,20 @@ export default function App() {
     navigationService.getAllowExpressways(),
   );
   const [voiceOn, setVoiceOn] = useState(() => voiceGuidance.isEnabled());
+  const [overlaysOn, setOverlaysOn] = useState(() => mapService.overlaysOnMap());
+  const [ride, setRide] = useState<LiveRide | null>(() => rideLogService.getLive());
+  const [rideSheetOpen, setRideSheetOpen] = useState(false);
+  const [rideBusy, setRideBusy] = useState(false);
+  // Re-renders the ride clock each second while recording.
+  const [, setRideTick] = useState(0);
+  /** A past ride drawn on the map from Library. */
+  const [viewedRide, setViewedRide] = useState<RideRecord | null>(null);
+  const [libraryTab, setLibraryTab] = useState<LibraryTab>('trips');
   const previewToken = useRef(0);
   const planTripKey = useRef<string | null>(null);
   const screenRef = useRef<AppScreen>(screen);
   const handleBackRef = useRef<() => void>(() => {});
+  const handlePoiActionRef = useRef<(poi: MapPoi, action: PoiAction) => void>(() => {});
   const lastBackAt = useRef(0);
   const zenTimer = useRef<number | undefined>(undefined);
   const zenLayerRef = useRef<HTMLDivElement>(null);
@@ -186,6 +214,27 @@ export default function App() {
     void downloadPolicy.start();
     // Every route plan gets its notification with Pause and Stop.
     const offAutoBackground = backgroundPlanning.watch();
+    const offPoiAction = mapService.subscribePoiAction((poi, action) =>
+      handlePoiActionRef.current(poi, action),
+    );
+    // The Offline tab's switches change the overlays too.
+    const offOverlays = mapService.subscribeOverlays(() => setOverlaysOn(mapService.overlaysOnMap()));
+    // A ride under way carries on (Android records with the app closed too).
+    void rideLogService.init();
+    const offRide = rideLogService.subscribe(() => setRide(rideLogService.getLive()));
+    const offRideSaved = rideLogService.subscribeSaved((saved, reason) => {
+      setRideSheetOpen(false);
+      setToast(
+        saved
+          ? { message: `Saved “${saved.name}” · ${(saved.distanceMeters / 1000).toFixed(1)} km · in Library → Rides`, tone: 'success' }
+          : { message: reason ?? 'Ride not saved', tone: 'error' },
+      );
+    });
+    // Maps of deleted trips go at start-up, so Undo after a delete keeps the map.
+    void routeLibrary
+      .list()
+      .then((routes) => mapPackService.pruneOrphans(routes.map((route) => route.id)))
+      .catch(() => undefined);
 
     const tick = window.setInterval(() => setNow(Date.now()), 2000);
     // At most once a day; downloads quietly in the background.
@@ -213,6 +262,10 @@ export default function App() {
       unsubTrip();
       unsubMap();
       offAutoBackground();
+      offPoiAction();
+      offOverlays();
+      offRide();
+      offRideSaved();
       window.clearInterval(tick);
       window.clearTimeout(poiUpdate);
       window.clearTimeout(appUpdate);
@@ -319,7 +372,7 @@ export default function App() {
     );
   };
 
-  const handleMapClick = (coordinate: Coordinate) => {
+  const handleMapClick = (coordinate: Coordinate, name?: string) => {
     // Zen mode is for looking around: taps never change the trip.
     if (zenMode) return;
     if (rideMode) {
@@ -329,7 +382,7 @@ export default function App() {
     if (navMode) return;
 
     if (tripPlanner.getState().mapPick) {
-      const ok = tripPlanner.completeMapPick(coordinate);
+      const ok = tripPlanner.completeMapPick(coordinate, name);
       if (ok) {
         syncItineraryMarkers();
         setFollowGps(false);
@@ -345,6 +398,43 @@ export default function App() {
     tripPlanner.setDestinationFromCoordinate(coordinate, 'Map pin');
     mapService.clearItineraryStops();
   };
+
+  const handlePoiAction = (poi: MapPoi, action: PoiAction) => {
+    if (action === 'pick') {
+      handleMapClick(poi.coordinate, poi.name);
+      return;
+    }
+    if (action === 'stop') {
+      tripPlanner.addStop(
+        createTripStop(poi.kind, poi.coordinate, poi.name),
+        tripRoute?.coordinates ?? null,
+      );
+      syncItineraryMarkers();
+      setToast({ message: `Added “${poi.name}” as a stop`, tone: 'success' });
+      return;
+    }
+    setFollowGps(false);
+    mapService.setDestination(poi.coordinate);
+    navigationService.setDestination(poi.coordinate);
+    tripPlanner.setDestinationFromCoordinate(poi.coordinate, poi.name);
+    mapService.clearItineraryStops();
+    setToast({ message: `Going to “${poi.name}”`, tone: 'success' });
+  };
+
+  useEffect(() => {
+    handlePoiActionRef.current = handlePoiAction;
+  });
+
+  // What a fuel or food popup offers: nothing mid-ride or in zen mode.
+  const hasDestination = itinerary.destination != null;
+  useEffect(() => {
+    let actions: PoiAction[];
+    if (navMode || zenMode || rideMode) actions = [];
+    else if (mapPickActive) actions = ['pick'];
+    else if (hasDestination) actions = ['destination', 'stop'];
+    else actions = ['destination'];
+    mapService.setPoiActions(actions);
+  }, [navMode, zenMode, rideMode, mapPickActive, hasDestination]);
 
   const handlePlanRoute = () => {
     const end =
@@ -627,6 +717,49 @@ export default function App() {
     );
   };
 
+  useEffect(() => {
+    if (ride?.state !== 'recording') return;
+    const timer = window.setInterval(() => setRideTick((n) => n + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [ride?.state]);
+
+  const handleRecordButton = async () => {
+    if (ride) {
+      setRideSheetOpen(true);
+      return;
+    }
+    try {
+      await rideLogService.start();
+      setToast({ message: 'Recording your ride', tone: 'success' });
+    } catch (e) {
+      setToast({ message: e instanceof Error ? e.message : "Couldn't start recording", tone: 'error' });
+    }
+  };
+
+  const runRide = async (work: () => Promise<unknown>) => {
+    setRideBusy(true);
+    try {
+      await work();
+    } catch (e) {
+      setToast({ message: e instanceof Error ? e.message : 'Something went wrong', tone: 'error' });
+    } finally {
+      setRideBusy(false);
+    }
+  };
+
+  const handleShowRide = (picked: RideRecord) => {
+    setViewedRide(picked);
+    setFollowGps(false);
+    setScreen('map');
+    // After the map is on screen, so it frames the ride at its real size.
+    window.setTimeout(() => void rideLogService.showOnMap(picked), 80);
+  };
+
+  const hideViewedRide = () => {
+    rideLogService.hideFromMap();
+    setViewedRide(null);
+  };
+
   const openSaveShareSheet = (mode: SaveShareMode) => {
     if (!navigationService.getActiveCalculatedRoute()) {
       setToast({ message: 'No route to save yet', tone: 'error' });
@@ -634,7 +767,17 @@ export default function App() {
     }
     setSheetError(null);
     setSheetBusy(false);
+    shareRouteId.current = crypto.randomUUID();
     setSheetMode(mode);
+  };
+
+  /** The map fetched only for sharing isn't kept once the sheet closes. */
+  const closeSheet = () => {
+    setSheetMode(null);
+    setSheetError(null);
+    const id = shareRouteId.current;
+    shareRouteId.current = null;
+    if (id) void mapPackService.deleteForRoute(id).catch(() => undefined);
   };
 
   /** The trip's names, when the route being saved was planned for it. */
@@ -660,32 +803,52 @@ export default function App() {
     };
   };
 
-  const handleSheetConfirm = async (name: string) => {
+  const handleSheetConfirm = async (name: string, withMap: boolean) => {
     if (!sheetMode) return;
     setSheetBusy(true);
     setSheetError(null);
+    setSheetProgress(null);
     try {
       if (sheetMode === 'save') {
         setToast({ message: 'Saving route…', tone: 'loading' });
         const saved = await navigationService.saveActiveRoute(name, tripPlaces());
+        // The map downloads in the background; Library shows its progress.
+        if (withMap) void mapPackService.downloadRoute(saved).catch(() => undefined);
         setLibraryTick((n) => n + 1);
-        setSheetMode(null);
+        closeSheet();
         setScreen('library');
-        setToast({ message: `Saved “${saved.name}”`, tone: 'success' });
+        setToast({
+          message: withMap
+            ? `Saved “${saved.name}” · saving its map`
+            : `Saved “${saved.name}”`,
+          tone: 'success',
+        });
       } else {
         setToast({ message: 'Preparing share file…', tone: 'loading' });
-        const snapshot = navigationService.buildSavedSnapshot(name, tripPlaces());
-        if (!snapshot) throw new Error('No route to share');
+        const built = navigationService.buildSavedSnapshot(name, tripPlaces());
+        if (!built) throw new Error('No route to share');
+        const snapshot = { ...built, id: shareRouteId.current ?? built.id };
+        const pack = mapPackService.packForRoute(snapshot.id);
+        if (
+          withMap &&
+          (!pack || pack.saved < pack.tiles) &&
+          !(await downloadSheetMap(snapshot))
+        ) {
+          // Cancelled: back to the sheet as it was.
+          setToast(null);
+          return;
+        }
         const shared = await routeLibrary.exportAndShare(
           snapshot,
           'trailcompass',
+          { withMap },
         );
         if (!shared) {
           // Dismissed the system share sheet: stay on ours, no error.
           setToast(null);
           return;
         }
-        setSheetMode(null);
+        closeSheet();
         setToast({
           message: `Ready to share “${snapshot.name}”`,
           tone: 'success',
@@ -698,6 +861,26 @@ export default function App() {
       setToast({ message, tone: 'error' });
     } finally {
       setSheetBusy(false);
+      setSheetProgress(null);
+    }
+  };
+
+  /** Downloads the map for a route about to be shared; false when cancelled. */
+  const downloadSheetMap = async (route: SavedRoute): Promise<boolean> => {
+    sheetMapRoute.current = route.id;
+    const off = mapPackService.subscribe(() => {
+      const job = mapPackService.getJob(routePackId(route.id));
+      if (job?.state === 'waiting-wifi') setSheetProgress('Waiting for Wi-Fi…');
+      if (job?.state === 'downloading' && job.total > 0) {
+        setSheetProgress(`Map ${Math.round((job.done / job.total) * 100)}%`);
+      }
+    });
+    setToast({ message: 'Downloading the map along the route…', tone: 'loading' });
+    try {
+      return (await mapPackService.downloadRoute(route)) != null;
+    } finally {
+      off();
+      sheetMapRoute.current = null;
     }
   };
 
@@ -827,6 +1010,43 @@ export default function App() {
           </button>
         ) : null}
 
+        {!zenMode ? (
+          <button
+            type="button"
+            className="tc-locate-btn tc-poi-btn"
+            aria-pressed={overlaysOn}
+            aria-label={overlaysOn ? 'Hide map overlays' : 'Show map overlays'}
+            title="Map overlays"
+            onClick={() => mapService.setOverlaysShown(!overlaysOn)}
+          >
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden>
+              <path
+                d="M12 3 2.5 8 12 13l9.5-5L12 3ZM2.5 12 12 17l9.5-5M2.5 16 12 21l9.5-5"
+                stroke="currentColor"
+                strokeWidth="1.9"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        ) : null}
+
+        {!zenMode ? (
+          <button
+            type="button"
+            className="tc-locate-btn tc-rec-btn"
+            data-state={ride?.state ?? 'idle'}
+            aria-label={ride ? 'Ride recording: open controls' : 'Record a ride'}
+            title={ride ? 'Ride recording' : 'Record ride'}
+            onClick={() => void handleRecordButton()}
+          >
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden>
+              <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.9" />
+              <circle className="tc-rec-btn-dot" cx="12" cy="12" r="4.2" fill="currentColor" />
+            </svg>
+          </button>
+        ) : null}
+
         <aside className="tc-hud" aria-label="Status">
           <div
             className={`tc-gps-chip tc-gps-chip-${gpsTone}`}
@@ -849,6 +1069,25 @@ export default function App() {
             onEnable={() => void compassService.start()}
             onOpen={mapPickActive ? undefined : openZenMode}
           />
+          {ride ? (
+            <button type="button" className="tc-rec-chip" data-state={ride.state} onClick={() => setRideSheetOpen(true)}>
+              <span className="tc-rec-dot" data-state={ride.state} aria-hidden />
+              <span className="tc-rec-chip-label">{ride.state === 'recording' ? 'REC' : 'PAUSED'}</span>
+              <span className="tc-rec-chip-value">
+                {(ride.distanceMeters / 1000).toFixed(1)} km · {formatClock(rideLogService.activeSeconds())}
+              </span>
+            </button>
+          ) : null}
+          {viewedRide ? (
+            <div className="tc-ride-view-chip" role="status">
+              <span>{viewedRide.name} · {(viewedRide.distanceMeters / 1000).toFixed(1)} km</span>
+              <button type="button" aria-label="Hide this ride" onClick={hideViewedRide}>
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden>
+                  <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+                </svg>
+              </button>
+            </div>
+          ) : null}
         </aside>
 
         {zenPhase !== 'off' ? (
@@ -917,20 +1156,43 @@ export default function App() {
           </div>
         ) : null}
 
+        <RideSheet
+          ride={ride}
+          open={rideSheetOpen}
+          seconds={rideLogService.activeSeconds()}
+          busy={rideBusy}
+          onClose={() => setRideSheetOpen(false)}
+          onPause={() => void runRide(() => rideLogService.pause())}
+          onResume={() => void runRide(() => rideLogService.resume())}
+          onFinish={() => void runRide(() => rideLogService.finish())}
+          onDiscard={() =>
+            void runRide(async () => {
+              await rideLogService.discard();
+              setRideSheetOpen(false);
+              setToast({ message: 'Ride discarded', tone: 'success' });
+            })
+          }
+        />
+
         <SaveShareRouteSheet
           open={sheetMode != null}
           mode={sheetMode ?? 'save'}
           route={navigationService.getActiveCalculatedRoute()}
           profile={nav.profile}
           busy={sheetBusy}
+          progress={sheetProgress}
           error={sheetError}
           onClose={() => {
-            if (!sheetBusy) {
-              setSheetMode(null);
-              setSheetError(null);
-            }
+            if (!sheetBusy) closeSheet();
           }}
-          onConfirm={(name) => void handleSheetConfirm(name)}
+          onConfirm={(name, withMap) => void handleSheetConfirm(name, withMap)}
+          onCancelBusy={
+            sheetProgress
+              ? () => {
+                  if (sheetMapRoute.current) mapPackService.cancel(routePackId(sheetMapRoute.current));
+                }
+              : undefined
+          }
         />
 
         {toast && screen === 'map' ? (
@@ -980,6 +1242,9 @@ export default function App() {
             refreshKey={libraryTick}
             onOpenRoute={handleOpenSavedRoute}
             onPlanTrip={() => setScreen('plan')}
+            onShowRide={handleShowRide}
+            tab={libraryTab}
+            onTabChange={setLibraryTab}
           />
           {toast ? (
             <StatusToast message={toast.message} tone={toast.tone} />

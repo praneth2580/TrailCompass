@@ -25,6 +25,8 @@ export interface GpsFix {
   /** Course over ground in degrees, when moving. */
   headingDegrees: number | null;
   timestampMs: number;
+  /** Satellites in the last satellite fix (Android). */
+  satellites?: number;
 }
 
 export interface CompassReading {

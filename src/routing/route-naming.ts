@@ -28,6 +28,16 @@ export function formatEtaShort(seconds: number): string {
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
 }
 
+/** "42:07", "1:05:12" */
+export function formatClock(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = seconds % 60;
+  const mm = String(m).padStart(h > 0 ? 2 : 1, '0');
+  const ss = String(s).padStart(2, '0');
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** When something was saved: "today 12:58", "yesterday", "3 days ago" or "6 Oct". */

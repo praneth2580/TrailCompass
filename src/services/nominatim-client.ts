@@ -21,6 +21,14 @@ export interface NominatimResult {
   type?: string;
   category?: string;
   class?: string;
+  /** e.g. "city", "state_district", "state". */
+  addresstype?: string;
+  osm_type?: 'node' | 'way' | 'relation';
+  osm_id?: number;
+  /** [south, north, west, east] */
+  boundingbox?: [string, string, string, string];
+  /** With polygon_geojson=1. */
+  geojson?: { type: string; coordinates: unknown };
 }
 
 let nextRequestAt = 0;

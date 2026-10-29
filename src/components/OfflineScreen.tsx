@@ -29,7 +29,16 @@ import {
   type DownloadNetworks,
 } from '../services/download-policy.service';
 import type { NetworkType } from '../services/downloads-plugin';
+import { mapService, MAP_OVERLAYS } from '../services/map.service';
+import {
+  LOCATION_SOURCES,
+  locationService,
+  type LocationStatus,
+} from '../services/location.service';
+import { rideLogService } from '../services/ride-log.service';
 import { RoadDataList } from './RoadDataList';
+import { OfflineMapsList } from './OfflineMapsList';
+import { Switch } from './RouteOptionsPanel';
 
 interface OfflineScreenProps {
   engine: OfflineEngineStatus;
@@ -109,6 +118,12 @@ export function OfflineScreen({ engine }: OfflineScreenProps) {
       </header>
 
       <OnThisPhone packs={packs} loading={loading} places={places} />
+
+      <OfflineMapsList />
+
+      <MapOverlaysSection />
+
+      <LocationSection />
 
       <DownloadsSection />
 
@@ -240,6 +255,123 @@ function OnThisPhone({
   );
 }
 
+/** Which places the map draws; its layers button shows or hides them all. */
+function MapOverlaysSection() {
+  const [overlays, setOverlays] = useState(() => mapService.getOverlays());
+
+  useEffect(() => mapService.subscribeOverlays(() => setOverlays(mapService.getOverlays())), []);
+
+  return (
+    <section className="tc-offline-section" aria-labelledby="tc-overlays-heading">
+      <h2 className="tc-list-heading" id="tc-overlays-heading">
+        Map
+      </h2>
+      <div className="tc-offline-card tc-offline-overlays">
+        <div className="tc-offline-card-head">
+          <strong>Show on the map</strong>
+        </div>
+        <div className="tc-route-switches">
+          {MAP_OVERLAYS.map((overlay) => (
+            <Switch
+              key={overlay.id}
+              label={overlay.label}
+              checked={overlays[overlay.id]}
+              onChange={(on) => mapService.setOverlay(overlay.id, on)}
+            />
+          ))}
+        </div>
+        <p className="tc-offline-hint">
+          {overlays.shown
+            ? "The layers button on the map hides them all for a cleaner view."
+            : 'Hidden for now: tap the layers button on the map to show them.'}
+        </p>
+      </div>
+    </section>
+  );
+}
+
+/** The GPS mode, and whether navigating records a ride. */
+function LocationSection() {
+  const [source, setSource] = useState(() => locationService.getSource());
+  const [status, setStatus] = useState<LocationStatus | null>(null);
+  const [autoRecord, setAutoRecord] = useState(() => rideLogService.getAutoRecord());
+
+  useEffect(() => {
+    let alive = true;
+    const offSource = locationService.subscribeSource(() => setSource(locationService.getSource()));
+    const offRides = rideLogService.subscribe(() => setAutoRecord(rideLogService.getAutoRecord()));
+    // Satellites in use, and whether the phone's location setting is on.
+    const poll = () =>
+      void locationService.status().then((next) => {
+        if (alive) setStatus(next);
+      });
+    poll();
+    const timer = window.setInterval(poll, 3_000);
+    return () => {
+      alive = false;
+      offSource();
+      offRides();
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const locationOff = status != null && (source === 'saver' ? !status.networkEnabled : !status.gpsEnabled);
+
+  return (
+    <section className="tc-offline-section" aria-labelledby="tc-location-heading">
+      <h2 className="tc-list-heading" id="tc-location-heading">
+        Location
+      </h2>
+      <div className="tc-offline-card tc-offline-location">
+        <div className="tc-offline-card-head">
+          <strong>GPS mode</strong>
+          {status && source !== 'saver' && status.satellites > 0 ? (
+            <span className="tc-offline-net" data-network="wifi">
+              {status.satellites} satellites
+            </span>
+          ) : null}
+        </div>
+        <div className="tc-choice-list" role="radiogroup" aria-label="GPS mode">
+          {LOCATION_SOURCES.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              role="radio"
+              aria-checked={source === option.id}
+              className="tc-choice"
+              onClick={() => locationService.setSource(option.id)}
+            >
+              <span className="tc-choice-mark" aria-hidden />
+              <span className="tc-choice-text">
+                <strong>{option.label}</strong>
+                <span>{option.detail}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+        {locationOff ? (
+          <p className="tc-offline-notice" role="status">
+            The phone's location is switched off.{' '}
+            <button type="button" className="tc-offline-link" onClick={() => void locationService.openLocationSettings()}>
+              Turn it on
+            </button>
+          </p>
+        ) : null}
+        {status == null ? (
+          <p className="tc-offline-hint">In a browser, the browser decides where your position comes from.</p>
+        ) : null}
+        <div className="tc-route-switches tc-location-switches">
+          <Switch
+            label="Record rides while navigating"
+            checked={autoRecord}
+            onChange={(on) => rideLogService.setAutoRecord(on)}
+          />
+        </div>
+      </div>
+    </section>
+  );
+}
+
 const DOWNLOAD_NETWORKS: Array<{ value: DownloadNetworks; label: string }> = [
   { value: 'wifi', label: 'Wi-Fi only' },
   { value: 'any', label: 'Wi-Fi & mobile data' },
@@ -310,8 +442,9 @@ function DownloadsSection() {
           </p>
         ) : null}
         <p className="tc-offline-hint">
-          Road data for planning, fuel &amp; food updates and app updates.
-          Rerouting during a ride, the map and search always use any network.
+          Road data for planning, offline maps, fuel &amp; food updates and app
+          updates. Rerouting during a ride, the map and search always use any
+          network.
         </p>
       </div>
     </section>
@@ -539,8 +672,9 @@ function EngineDetails({ engine }: { engine: OfflineEngineStatus }) {
         </div>
       </details>
       <p className="tc-offline-credits">
-        Road data © OpenStreetMap contributors (ODbL). Fuel and food places
-        from the Overture Maps Foundation.
+        Road and map data © OpenStreetMap contributors (ODbL). Map tiles by
+        OpenFreeMap, © OpenMapTiles. Fuel and food places from the Overture
+        Maps Foundation.
       </p>
     </>
   );

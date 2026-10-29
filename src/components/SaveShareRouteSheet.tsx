@@ -16,9 +16,13 @@ interface SaveShareRouteSheetProps {
   route: CalculatedRoute | null;
   profile?: RoutingProfileId;
   busy: boolean;
+  /** Replaces the busy button's label, e.g. "Map 40%". */
+  progress?: string | null;
   error?: string | null;
   onClose: () => void;
-  onConfirm: (name: string) => void;
+  onConfirm: (name: string, withMap: boolean) => void;
+  /** Stops the map download; keeps Cancel usable while it runs. */
+  onCancelBusy?: () => void;
 }
 
 export function SaveShareRouteSheet({
@@ -27,14 +31,17 @@ export function SaveShareRouteSheet({
   route,
   profile,
   busy,
+  progress,
   error,
   onClose,
   onConfirm,
+  onCancelBusy,
 }: SaveShareRouteSheetProps) {
   const titleId = useId();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [name, setName] = useState('');
   const [seed, setSeed] = useState('');
+  const [withMap, setWithMap] = useState(true);
   const openKey =
     open && route
       ? `${mode}:${route.id ?? ''}:${route.distanceMeters}:${route.durationSeconds}`
@@ -43,6 +50,7 @@ export function SaveShareRouteSheet({
   if (openKey && openKey !== seed) {
     setSeed(openKey);
     setName(suggestRouteName(route!, profile));
+    setWithMap(true);
   } else if (!openKey && seed) {
     setSeed('');
   }
@@ -65,7 +73,13 @@ export function SaveShareRouteSheet({
   const hint =
     mode === 'save'
       ? 'Stored on this device. Open it anytime from Library.'
-      : 'Exports a .trailcompass.json file you can send to another device.';
+      : withMap
+        ? 'Sends the route with its map, so it opens offline on the other phone.'
+        : 'Exports a .trailcompass.json file you can send to another device.';
+  const mapHint =
+    mode === 'save'
+      ? 'Saves the map along the route, so it shows without signal.'
+      : 'Adds the map along the route. A bigger file, up to about 50 MB.';
 
   const trimmed = name.trim();
   const canSubmit = trimmed.length > 0 && !busy;
@@ -117,10 +131,23 @@ export function SaveShareRouteSheet({
             placeholder="Name this ride"
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && canSubmit) onConfirm(trimmed);
+              if (e.key === 'Enter' && canSubmit) onConfirm(trimmed, withMap);
               if (e.key === 'Escape' && !busy) onClose();
             }}
           />
+        </label>
+
+        <label className="tc-sheet-check">
+          <input
+            type="checkbox"
+            checked={withMap}
+            disabled={busy}
+            onChange={(e) => setWithMap(e.target.checked)}
+          />
+          <span>
+            <strong>Offline map</strong>
+            <span>{mapHint}</span>
+          </span>
         </label>
 
         {error ? (
@@ -133,21 +160,21 @@ export function SaveShareRouteSheet({
           <button
             type="button"
             className="tc-btn tc-btn-secondary"
-            onClick={onClose}
-            disabled={busy}
+            onClick={busy ? onCancelBusy : onClose}
+            disabled={busy && !onCancelBusy}
           >
             Cancel
           </button>
           <button
             type="button"
             className="tc-btn"
-            onClick={() => onConfirm(trimmed)}
+            onClick={() => onConfirm(trimmed, withMap)}
             disabled={!canSubmit}
           >
             {busy ? (
               <>
                 <span className="tc-spinner tc-spinner-sm" aria-hidden />
-                {mode === 'save' ? 'Saving…' : 'Preparing…'}
+                {progress ?? (mode === 'save' ? 'Saving…' : 'Preparing…')}
               </>
             ) : (
               confirmLabel

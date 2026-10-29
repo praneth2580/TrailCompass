@@ -32,7 +32,9 @@ TrailCompass keeps you on roads bikes are allowed on, speaks every turn into you
 - **Keeps going on weak signal.** Routes are calculated on your phone. Once a route is planned, turn-by-turn, voice prompts and stop suggestions work without a connection.
 - **Built for the handlebar.** A full-screen ride view while you're moving, a screen that stays on, and large touch targets that are easy to hit. Tap the compass for zen mode: just the map, your route and a big compass.
 - **Plans while you do other things.** Every route plan shows its progress in a notification, with Pause and Stop, so you can leave the app while it works. Set downloads to Wi-Fi only to save mobile data.
-- **Save and share rides.** Keep trips in your library and open them later without planning again. Share a route as a file with your riding group.
+- **A log of every ride.** Tap record on the map, or let navigation record for you. It keeps recording with the screen off or the app closed, and saves your track with distance, moving time, average and top speed and climb. Export it as GPX, or keep its path as a trip to ride again.
+- **Choose your GPS.** Satellites only, for no mobile data at all; satellites with mobile data and Wi-Fi, for the quickest and most precise fix; or a battery saver.
+- **Save and share rides.** Keep trips in your library and open them later without planning again. A saved trip keeps the map along its route, so it shows without signal. Share a route with your riding group as one file, map included.
 - **Always up to date.** TrailCompass tells you when a new version is out and installs it from inside the app. Fuel and food data refreshes every month on its own.
 
 ## Stops that fit your ride
@@ -41,7 +43,7 @@ TrailCompass keeps you on roads bikes are allowed on, speaks every turn into you
 
 **Food by time of day.** Set when you leave. It finds breakfast, lunch or dinner where you'll be at that hour.
 
-About **55,000 fuel stations** and **138,000 places to eat** across India are built into the app, so suggestions work offline. The data is refreshed every month.
+About **55,000 fuel stations** and **138,000 places to eat** across India are built into the app, so suggestions work offline. They're on the map too: tap one to head there or add it as a stop. The data is refreshed every month.
 
 ## How it works
 
@@ -68,7 +70,7 @@ Yes. There's no account to create and no ads.
 <details>
 <summary><strong>Does it work offline?</strong></summary>
 
-Partly. Plan your route while you have a connection: the roads are saved on your phone, and turn-by-turn, voice prompts and fuel and food suggestions then work without signal. The background map needs a connection to load areas you haven't viewed.
+Mostly. Plan your route while you have a connection and save it: the roads and the map along the route are kept on your phone, and turn-by-turn, voice prompts, the map and fuel and food suggestions then work without signal. You can also save the map of a whole city or state from the Offline tab. Away from saved trips and areas, the map needs a connection.
 </details>
 
 <details>

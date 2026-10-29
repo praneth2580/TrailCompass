@@ -24,7 +24,7 @@ How to build, run, test and release TrailCompass. For a file-by-file tour of the
 | UI | React 19, TypeScript 6, plain CSS (`src/index.css`, design tokens in `:root`) |
 | Build | Vite 8 |
 | Native shell | Capacitor 7, Android only (min Android 6.0, SDK 23; target SDK 35) |
-| Capacitor plugins | Geolocation, Filesystem, Preferences, Share, App, Keep Awake, Text-to-Speech, and two plugins inside the app: `AppUpdaterPlugin` and `DownloadsPlugin` |
+| Capacitor plugins | Geolocation (permission only), Filesystem, Preferences, Share, App, Keep Awake, Text-to-Speech, and four plugins inside the app: `AppUpdaterPlugin`, `DownloadsPlugin`, `MapFilesPlugin` and `RideLocationPlugin` |
 | Map | MapLibre GL JS 6 with OpenFreeMap's Liberty style (online) |
 | Routing | On-device A* over OpenStreetMap roads downloaded from Overpass; Valhalla WASM optional |
 | Tests and lint | Vitest 4 (Node environment), oxlint |
@@ -89,7 +89,7 @@ src/
   services/                   Location, compass, map, navigation, trips, stops, voice, updates
   routing/                    Road downloads (Overpass), road graph and A*, turn instructions, route files
   database/                   Small JSON stores on Capacitor Preferences
-  offline/                    File storage helpers (offline map packages are not built yet)
+  offline/                    Offline maps: PMTiles writer, tile store, tile planning, the map's tcmap:// protocol, file storage
   hooks/                      Back button, keep-awake, ride view
   types/                      Shared types
 ```
@@ -102,11 +102,25 @@ src/
 
 **Navigation.** `navigation.service.ts` follows your position along the route. It detects when you're off route (it needs two bad fixes in a row) and reroutes, skipping stops you've already passed. Voice prompts (`voice-guidance.service.ts`) are timed to your speed. The screen stays on while you navigate, and the ride view goes full screen once you're moving.
 
+**GPS modes.** On Android the position comes from `RideLocationPlugin` (`LocationHub.java`), in the mode picked under Offline → Location (`location.service.ts`): **Satellites only** (Android's GPS provider: no data, no Google services), **Satellites + mobile data & Wi-Fi** (GPS and network providers, the GPS preferred while it has a fix; the default) or **Battery saver** (network only, about 100 m). Permission is still asked through `@capacitor/geolocation`. In a browser, the browser picks the source; Battery saver asks it for less accuracy.
+
+**Ride log.** `ride-log.service.ts` records rides: from the record button on the map, or by itself while navigating (a setting, on by default; arriving or stopping finishes it). On Android, `RideRecorderService` (a `location` foreground service, kept when the app is swiped away) appends every fix to `map-packages/rides/<id>.csv` and shows the distance and time in a notification with Pause and Finish; the app picks the ride up when reopened. In a browser the page records while open. Finishing turns the raw track into a ride (`ride-track.ts`: only fixes within 30 m, moves over the GPS's own wobble, pauses not bridged, moving time above 3.6 km/h, top speed as the middle of three readings, climb in 10 m steps, the track simplified to 3 m), kept by `database/ride-repository.ts`. Library → Rides lists them: show on the map, export GPX, save as a trip, delete with Undo.
+
+**Offline maps.** Every map request goes through the `tcmap://` protocol (`src/offline/tile-protocol.ts`). The style is a bundled copy of OpenFreeMap's Liberty style (`src/offline/liberty-style.json`), so the map opens without a network. A vector tile comes from the phone's tile store when it has it, else from OpenFreeMap. Fonts and icons are kept on the phone the first time they load.
+
+An offline map is either a trip (saving one, or ticking **Offline map** when sharing) or an area: a city, district or state searched in the Offline tab (**Save an area**, through Nominatim with the area's outline). `src/offline/tile-plan.ts` picks its tiles: for a trip, the whole area up to zoom 8, then narrower bands along the road up to zoom 14; for an area, every tile of its outline zoom by zoom, as close as fits. A map is only a list of tiles (`src/services/map-pack.service.ts`). The tiles themselves are kept once, in the tile store (`src/offline/tile-store.ts`): PMTiles files under `map-packages/tiles/`, each tile with the time it was downloaded and the OpenFreeMap build it came from. Maps that overlap share tiles, a download skips tiles already saved from the current build, and when a tile is saved again the newer download wins. Tiles no map needs are deleted, and a file that is mostly replaced tiles is rewritten.
+
+Downloads stay within OpenFreeMap's offline limits: at most 3,000 tiles, 50 MB and 4 requests at a time, with the `TrailCompass` User-Agent (`capacitor.config.ts`). A long trip or a big area keeps less street detail: a state gets its main roads, a city its streets. On Android the files live in the app's data folder, and the map reads tiles by byte range through `MapFilesPlugin` (the web view's local server ignores where a Range starts). In a browser they are kept in IndexedDB.
+
+**Sharing maps.** A trip or an area can be shared as one `.trailcompass.pmtiles` file: its tiles, each tile's download time, the map's details and, for a trip, the route. Importing one (Library or the Offline tab) merges it in as if it had been downloaded on that phone: a trip with the same id is kept once, whichever copy changed last; of each tile, the newer download wins; and the map's details come from whichever copy was downloaded last. Plain `.trailcompass.json` files still work, and also keep one copy per trip.
+
+**Fuel and food on the map.** Fuel stations and restaurants are separate overlays, each switched on or off in the Offline tab's **Map** section. The layers button under "my location" shows or hides all overlays at once. Inside India they come from the bundled Overture data (`bundledPoisInBounds`); elsewhere they come from OpenStreetMap places in the map tiles, so they work offline in a saved map too. Tap one for its name, **Go here** or **Add stop**.
+
 **Fuel and food stops.** `stop-suggest.service.ts` plans fuel stops by tank range and food stops by meal time. It searches a stretch of the route, not single points. Places come first from the Overture data bundled in `public/assets/poi/`, which also works offline. Live OpenStreetMap results are added where those are few: Nominatim for small areas, Overpass for long stretches.
 
 **Planning in the background.** Whenever a route starts planning (with the app on screen), a foreground service (`DownloadService`, type `dataSync`) shows a persistent notification with its progress. **Run in background** sends the app away while it carries on. The planning itself keeps running in the web view; the service only stops Android from closing the app. The notification's Pause cancels the plan and keeps the roads downloaded so far; Resume plans the same trip again from that cache; Stop cancels it. When the plan finishes in the background, a second notification says the route is ready or why it failed. `background-planning.service.ts` drives this through `DownloadsPlugin`.
 
-**Wi-Fi only downloads.** The Offline tab's Downloads setting (`download-policy.service.ts`) can keep large downloads off mobile data. Road downloads for planning then wait for Wi-Fi (the progress line says so), and fuel and food data and app updates hold off. Rerouting during a ride, map tiles and searches always use whatever network is up. `DownloadsPlugin` reports the network type from Android's `ConnectivityManager`.
+**Wi-Fi only downloads.** The Offline tab's Downloads setting (`download-policy.service.ts`) can keep large downloads off mobile data. Road downloads for planning and offline maps then wait for Wi-Fi (the progress line says so), and fuel and food data and app updates hold off. Rerouting during a ride, the map on screen and searches always use whatever network is up. `DownloadsPlugin` reports the network type from Android's `ConnectivityManager`.
 
 **Updates without a new build.** The fuel and food data refreshes itself. About once a day, `poi-data.service.ts` checks the website's `poi/manifest.json` and downloads a newer release. The app updates itself too: `app-update.service.ts` checks the website's `download/latest.json`, falling back to the GitHub API. It downloads the APK with progress and opens Android's installer through `AppUpdaterPlugin`.
 
@@ -121,7 +135,9 @@ Or one step at a time: `npm run cap:sync`, `npm run cap:build`, `npm run cap:ins
 - **Native code** in `android/app/src/main/java/com/example/trailcompass/`, registered in `MainActivity`:
   - `AppUpdaterPlugin.java` downloads update APKs and opens the installer.
   - `DownloadsPlugin.java` starts and stops `DownloadService` (background planning), posts its notifications (`DownloadNotifications.java`), and reports Wi-Fi or mobile data.
-- **Permissions:** location and internet; `REQUEST_INSTALL_PACKAGES` for in-app updates; `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_DATA_SYNC` and `POST_NOTIFICATIONS` (asked the first time you run planning in the background) for background planning; `ACCESS_NETWORK_STATE` for the Wi-Fi only setting.
+  - `MapFilesPlugin.java` reads and writes byte ranges of offline map files (PMTiles) in the app's data and cache folders.
+  - `RideLocationPlugin.java` gives the app its position from the chosen GPS mode (`LocationHub.java`) and controls ride recording (`RideRecorderService.java`).
+- **Permissions:** location and internet; `REQUEST_INSTALL_PACKAGES` for in-app updates; `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_DATA_SYNC` and `POST_NOTIFICATIONS` (asked the first time you run planning in the background) for background planning; `FOREGROUND_SERVICE_LOCATION` for recording rides with the screen off; `ACCESS_NETWORK_STATE` for the Wi-Fi only setting.
 - **App ID.** `com.example.trailcompass` is a placeholder. Changing it later makes Android treat the app as a different one, so installed copies won't update to it.
 
 ## Releasing a new version
@@ -195,7 +211,7 @@ python3 scripts/build-poi-tiles.py --country IN --country NP   # add countries
 
 | Service | Used for | Notes |
 |---|---|---|
-| [OpenFreeMap](https://openfreemap.org) | Map tiles | Online only; no API key |
+| [OpenFreeMap](https://openfreemap.org) | Map tiles, fonts and icons; offline maps | No API key. Offline downloads: at most 3,000 tiles or 50 MB each, 4 requests at a time, identifying User-Agent |
 | [Overpass API](https://wiki.openstreetmap.org/wiki/Overpass_API) | Road data, live fuel and food top-up | Public servers that are often busy. The client also tries `lz4.` and `z.overpass-api.de` and skips servers that just failed |
 | [Nominatim](https://nominatim.org) | Place search; fuel and food lookups in small areas | At most 1 request per second; on Android the app sends an identifying User-Agent |
 | [Overture Maps](https://overturemaps.org) | Fuel and food data, at build time | Public S3 bucket, read with DuckDB |
@@ -205,7 +221,9 @@ python3 scripts/build-poi-tiles.py --country IN --country NP   # add countries
 ## Known issues and gotchas
 
 - **Adding an npm package needs `--legacy-peer-deps`.** `@jansoft/mbujkanji-valhalla-wasm` depends on `@vitest/browser-*@latest`, which conflicts with the project's Vitest. A plain `npm install` from the lockfile only warns.
-- **The map isn't offline.** Map tiles come from OpenFreeMap over the network. The offline map package plumbing (`src/offline/`) is a stub.
+- **Only saved trips and areas have an offline map.** Elsewhere the map needs a network. Zoomed in past a saved map's detail, MapLibre stretches the closest zoom it has. Offline, the map keeps the fonts and icons it has loaded before: Latin, Indian scripts and Urdu are saved with the first offline map.
+- **Offline map downloads stop if the app is closed.** They run in the web view, like route planning. Tiles already downloaded are kept (in files of up to 500 tiles), so **Resume** carries on from there.
+- **Maps saved by builds from before the tile store are dropped.** Save a trip's map again from Library.
 - **Overpass can be down.** When every public Overpass server is busy, planning a long trip fails. Areas that did load are kept, so trying again later carries on.
 - **Swiping the app away ends background planning.** The planning runs in the web view, which closes with the app, so the service stops too (`android:stopWithTask`). Areas already downloaded stay cached.
 - **Placeholder app ID and debug builds** (see [Android builds](#android-builds) and [Releasing](#releasing-a-new-version)).

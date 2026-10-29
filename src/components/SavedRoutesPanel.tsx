@@ -1,9 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
-import type { Coordinate, SavedRoute } from '../types/route';
-import { routeLibrary } from '../services/route-library.service';
+import type { SavedRoute } from '../types/route';
+import { importSummary, routeLibrary } from '../services/route-library.service';
+import {
+  mapPackService,
+  routePackId,
+  type MapPackJob,
+  type MapPackMeta,
+} from '../services/map-pack.service';
 import { formatEtaShort, formatSavedAt } from '../routing/route-naming';
 import { getProfile } from '../routing/routing-profiles';
+import { TrackThumbnail } from './TrackThumbnail';
 
 interface SavedRoutesPanelProps {
   onOpenRoute: (route: SavedRoute) => void;
@@ -30,6 +37,9 @@ export function SavedRoutesPanel({
   const [routes, setRoutes] = useState<SavedRoute[]>([]);
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<number | null>(null);
+  // Re-render when a map download moves on or finishes.
+  const [, setMapTick] = useState(0);
   const [busy, setBusy] = useState<{ id: string; action: 'share' | 'delete' } | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [query, setQuery] = useState('');
@@ -52,6 +62,18 @@ export function SavedRoutesPanel({
     };
   }, [refreshKey]);
 
+  useEffect(() => {
+    let alive = true;
+    void mapPackService.init().then(() => {
+      if (alive) setMapTick((n) => n + 1);
+    });
+    const off = mapPackService.subscribe(() => setMapTick((n) => n + 1));
+    return () => {
+      alive = false;
+      off();
+    };
+  }, []);
+
   const handleImportClick = () => fileRef.current?.click();
 
   const handleFileChange = async (
@@ -63,13 +85,16 @@ export function SavedRoutesPanel({
     setImporting(true);
     setNotice(null);
     try {
-      const saved = await routeLibrary.importFromFile(file);
+      const outcome = await routeLibrary.importFromFile(file, (done, total) =>
+        setImportProgress(total > 0 ? Math.round((done / total) * 100) : null),
+      );
       await reload();
-      setNotice({ text: `Imported “${saved.name}”`, tone: 'ok' });
+      setNotice({ text: importSummary(outcome), tone: 'ok' });
     } catch (e) {
       setNotice({ text: e instanceof Error ? e.message : 'Import failed', tone: 'err' });
     } finally {
       setImporting(false);
+      setImportProgress(null);
     }
   };
 
@@ -77,7 +102,8 @@ export function SavedRoutesPanel({
     setBusy({ id: route.id, action: 'share' });
     setNotice(null);
     try {
-      const shared = await routeLibrary.exportAndShare(route, 'trailcompass');
+      // With its offline map when it has one.
+      const shared = await routeLibrary.exportAndShare(route, 'trailcompass', { withMap: true });
       if (!shared) return;
       setNotice({
         text: Capacitor.isNativePlatform()
@@ -142,13 +168,18 @@ export function SavedRoutesPanel({
             ) : (
               <ImportIcon />
             )}
-            {importing ? 'Importing…' : 'Import'}
+            {importing
+              ? importProgress != null
+                ? `Importing ${importProgress}%`
+                : 'Importing…'
+              : 'Import'}
           </button>
         ) : null}
         <input
           ref={fileRef}
           type="file"
-          accept=".json,.geojson,application/json,.trailcompass.json"
+          // Android only lists types it knows: shared maps arrive as octet-stream.
+          accept=".json,.geojson,application/json,.trailcompass.json,.pmtiles,application/octet-stream"
           className="tc-file-input"
           onChange={(e) => void handleFileChange(e)}
         />
@@ -221,7 +252,10 @@ export function SavedRoutesPanel({
                 onClick={() => onOpenRoute(route)}
                 disabled={anyBusy}
               >
-                <RouteThumbnail route={route} />
+                <TrackThumbnail
+                  coordinates={route.coordinates.length >= 2 ? route.coordinates : [route.start, route.end]}
+                  stops={route.waypoints ?? []}
+                />
                 <span className="tc-trip-text">
                   <strong>{route.name}</strong>
                   <span className="tc-trip-facts">{tripFacts(route)}</span>
@@ -256,6 +290,13 @@ export function SavedRoutesPanel({
                   )}
                 </button>
               </div>
+              <TripMapRow
+                pack={mapPackService.packForRoute(route.id)}
+                job={mapPackService.getJob(routePackId(route.id))}
+                disabled={anyBusy}
+                onDownload={() => void mapPackService.downloadRoute(route).catch(() => undefined)}
+                onCancel={() => mapPackService.cancel(routePackId(route.id))}
+              />
             </li>
           ))}
         </ul>
@@ -263,12 +304,88 @@ export function SavedRoutesPanel({
 
       {routes.length > 0 ? (
         <p className="tc-library-hint">
-          Tap a trip to open it on the map. Share sends it as a file; Import
-          opens one shared with you, or a GeoJSON route.
+          Tap a trip to open it on the map. Share sends it as a file, with its
+          offline map when it has one; Import opens one shared with you, or a
+          GeoJSON route.
         </p>
       ) : null}
     </section>
   );
+}
+
+/** Whether the trip's map is on the phone, with a button to save or stop it. */
+function TripMapRow({
+  pack,
+  job,
+  disabled,
+  onDownload,
+  onCancel,
+}: {
+  pack: MapPackMeta | undefined;
+  job: MapPackJob | undefined;
+  disabled: boolean;
+  onDownload: () => void;
+  onCancel: () => void;
+}) {
+  let text: string;
+  let tone: 'ok' | 'err' | undefined;
+  let action: { label: string; run: () => void } | null = null;
+  let percent: number | null = null;
+
+  if (job?.state === 'downloading') {
+    percent = job.total > 0 ? Math.round((job.done / job.total) * 100) : 0;
+    text = job.retrying
+      ? `Saving map · ${percent}% · trying ${job.retrying} tile${job.retrying === 1 ? '' : 's'} again`
+      : `Saving map · ${percent}%`;
+    action = { label: 'Stop', run: onCancel };
+  } else if (job?.state === 'queued') {
+    text = 'Map waiting for another download';
+    action = { label: 'Stop', run: onCancel };
+  } else if (job?.state === 'waiting-wifi') {
+    text = 'Map waits for Wi-Fi';
+    action = { label: 'Stop', run: onCancel };
+  } else if (job?.state === 'error') {
+    text = job.message;
+    tone = 'err';
+    action = { label: 'Retry', run: onDownload };
+  } else if (pack && pack.saved < pack.tiles) {
+    text = `Map ${Math.floor((pack.saved / Math.max(1, pack.tiles)) * 100)}% saved`;
+    action = { label: 'Resume', run: onDownload };
+  } else if (pack) {
+    text = [
+      `Offline map · ${formatBytes(pack.bytes)}`,
+      pack.maxZoom < 14 ? 'less street detail' : null,
+      pack.downloadedAt ? `downloaded ${formatSavedAt(pack.downloadedAt)}` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    tone = 'ok';
+  } else {
+    text = 'No offline map yet';
+    action = { label: 'Save map', run: onDownload };
+  }
+
+  return (
+    <div className="tc-trip-map" data-tone={tone}>
+      <MapIcon />
+      <span role="status">{text}</span>
+      {action ? (
+        <button type="button" onClick={action.run} disabled={disabled && action.run === onDownload}>
+          {action.label}
+        </button>
+      ) : null}
+      {percent != null ? (
+        <span className="tc-trip-map-bar" aria-hidden>
+          <span style={{ width: `${percent}%` }} />
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
 /** "331 km · 7h 25m · 2 stops" */
@@ -289,61 +406,17 @@ function tripMeta(route: SavedRoute): string {
   return route.profile ? `${getProfile(route.profile).label} · ${saved}` : saved;
 }
 
-const THUMB_SIZE = 64;
-const THUMB_PAD = 10;
-/** Enough points for the shape; long routes have thousands. */
-const THUMB_POINTS = 80;
-
-/** The route's shape, north up, with its start, stops and end. */
-function RouteThumbnail({ route }: { route: SavedRoute }) {
-  const shape = useMemo(() => thumbnailShape(route), [route]);
+function MapIcon() {
   return (
-    <svg className="tc-trip-thumb" viewBox={`0 0 ${THUMB_SIZE} ${THUMB_SIZE}`} aria-hidden>
-      <polyline className="tc-trip-thumb-casing" points={shape.line} />
-      <polyline className="tc-trip-thumb-line" points={shape.line} />
-      {shape.stops.map(([x, y], i) => (
-        <circle key={i} className="tc-trip-thumb-stop" cx={x} cy={y} r={2.6} />
-      ))}
-      <circle className="tc-trip-thumb-end" cx={shape.end[0]} cy={shape.end[1]} r={3.8} />
-      {/* On top, so a loop shows its start inside the end ring. */}
-      <circle className="tc-trip-thumb-start" cx={shape.start[0]} cy={shape.start[1]} r={3} />
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden>
+      <path
+        d="M9 4 3.5 6v14L9 18l6 2 5.5-2V4L15 6 9 4Zm0 0v14m6-12v14"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
     </svg>
   );
-}
-
-function thumbnailShape(route: SavedRoute) {
-  const coords = route.coordinates.length >= 2 ? route.coordinates : [route.start, route.end];
-  // Shrink longitude by latitude, so the shape keeps its proportions.
-  const midLat = (coords[0]![1] + coords[coords.length - 1]![1]) / 2;
-  const kx = Math.cos((midLat * Math.PI) / 180);
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minY = Infinity;
-  let maxY = -Infinity;
-  for (const [lon, lat] of coords) {
-    minX = Math.min(minX, lon * kx);
-    maxX = Math.max(maxX, lon * kx);
-    minY = Math.min(minY, lat);
-    maxY = Math.max(maxY, lat);
-  }
-  const scale = (THUMB_SIZE - 2 * THUMB_PAD) / Math.max(maxX - minX, maxY - minY, 1e-6);
-  const offsetX = (THUMB_SIZE - (maxX - minX) * scale) / 2;
-  const offsetY = (THUMB_SIZE - (maxY - minY) * scale) / 2;
-  const project = ([lon, lat]: Coordinate): [number, number] => [
-    Math.round((offsetX + (lon * kx - minX) * scale) * 10) / 10,
-    Math.round((offsetY + (maxY - lat) * scale) * 10) / 10,
-  ];
-  const step = Math.max(1, Math.floor(coords.length / THUMB_POINTS));
-  const line = coords
-    .filter((_, i) => i % step === 0 || i === coords.length - 1)
-    .map((point) => project(point).join(','))
-    .join(' ');
-  return {
-    line,
-    start: project(coords[0]!),
-    end: project(coords[coords.length - 1]!),
-    stops: (route.waypoints ?? []).map(project),
-  };
 }
 
 function ImportIcon() {

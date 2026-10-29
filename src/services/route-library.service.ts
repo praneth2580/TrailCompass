@@ -1,6 +1,5 @@
 import { Capacitor } from '@capacitor/core';
 import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
-import { Share } from '@capacitor/share';
 import type { CalculatedRoute, Coordinate } from '../routing/routing-adapter';
 import {
   parseRouteFile,
@@ -14,10 +13,28 @@ import {
   type SavedRoute,
 } from '../types/route';
 import { routeRepository } from '../database/route-repository';
+import {
+  isMapFile,
+  mapPackService,
+  routePackId,
+  type MapImportResult,
+} from './map-pack.service';
+import { downloadBlob, shareFile, type ShareText } from './share-file';
 
 const EXPORT_DIR = 'shared-routes';
 
 export type RouteExportKind = 'trailcompass' | 'geojson';
+
+/** An imported trip was new here, newer than the copy here, or not newer (kept as it was). */
+export type RouteImportStatus = 'added' | 'updated' | 'kept';
+
+export interface ImportOutcome {
+  /** The file's trip as Library now has it; absent for an area's map. */
+  route?: SavedRoute;
+  routeStatus?: RouteImportStatus;
+  /** The file's map, merged into the phone's offline maps. */
+  map?: MapImportResult;
+}
 
 export class RouteLibraryService {
   list(): Promise<SavedRoute[]> {
@@ -42,13 +59,17 @@ export class RouteLibraryService {
     return routeRepository.saveRoute(saved);
   }
 
-  async saveImported(route: SavedRoute): Promise<SavedRoute> {
-    // New id if colliding with an existing route of different content.
+  /**
+   * A trip from a file is the same trip as one here with its id: the copy
+   * changed last is kept, with its own dates, so nothing is saved twice.
+   */
+  async saveImported(route: SavedRoute): Promise<{ route: SavedRoute; status: RouteImportStatus }> {
     const existing = await routeRepository.getRoute(route.id);
-    if (existing) {
-      route = { ...route, id: crypto.randomUUID() };
+    if (existing && Date.parse(existing.updatedAt) >= Date.parse(route.updatedAt)) {
+      return { route: existing, status: 'kept' };
     }
-    return routeRepository.saveRoute(route);
+    await routeRepository.restoreRoute(route);
+    return { route, status: existing ? 'updated' : 'added' };
   }
 
   delete(id: string): Promise<void> {
@@ -60,11 +81,24 @@ export class RouteLibraryService {
     return routeRepository.restoreRoute(route);
   }
 
-  /** Resolves false when the rider dismisses the share sheet. */
+  /**
+   * Resolves false when the rider dismisses the share sheet. With
+   * `withMap` and an offline map saved for the route, shares the map with
+   * the route inside it (`.trailcompass.pmtiles`) instead of the JSON file.
+   */
   async exportAndShare(
     route: SavedRoute,
     kind: RouteExportKind = 'trailcompass',
+    options: { withMap?: boolean } = {},
   ): Promise<boolean> {
+    const mapFile =
+      options.withMap && kind === 'trailcompass'
+        ? await mapPackService.buildShareFile(routePackId(route.id), route)
+        : null;
+    if (mapFile) {
+      return shareFile(mapFile.file, mapFile.fileName, routeShareText(route, 'with offline map'));
+    }
+
     const body =
       kind === 'geojson' ? toGeoJson(route) : serializeRouteFile(route);
     const fileName =
@@ -73,7 +107,7 @@ export class RouteLibraryService {
         : suggestedFileName(route);
 
     if (!Capacitor.isNativePlatform()) {
-      downloadTextFile(fileName, body);
+      downloadBlob(fileName, new Blob([body], { type: 'application/json' }));
       return true;
     }
 
@@ -95,61 +129,63 @@ export class RouteLibraryService {
       path,
       directory: Directory.Cache,
     });
+    return shareFile({ uri }, fileName, routeShareText(route));
+  }
 
-    try {
-      await Share.share({
-        title: route.name,
-        text: `TrailCompass route · ${formatKm(route.distanceMeters)}`,
-        files: [uri],
-        dialogTitle: 'Share route',
-      });
-      return true;
-    } catch (e) {
-      if (isShareCancelled(e)) return false;
+  /**
+   * A route file, or a shared map file: a trip's map with the trip inside,
+   * or an area's map. Its trip and map join what's here, newest copy
+   * winning.
+   */
+  async importFromFile(
+    file: File,
+    onProgress?: (done: number, total: number) => void,
+  ): Promise<ImportOutcome> {
+    if (!(await isMapFile(file))) {
+      const { route, status } = await this.saveImported(parseRouteFile(await file.text()));
+      return { route, routeStatus: status };
     }
-
-    // Fallback for platforms that only accept url.
+    const shared = await mapPackService.openSharedFile(file);
+    const trip = shared.route ? await this.saveImported(shared.route) : null;
     try {
-      await Share.share({
-        title: route.name,
-        text: `TrailCompass route · ${formatKm(route.distanceMeters)}`,
-        url: uri,
-        dialogTitle: 'Share route',
-      });
-      return true;
+      const map = await mapPackService.importSharedFile(shared, onProgress);
+      return { route: trip?.route, routeStatus: trip?.status, map };
     } catch (e) {
-      if (isShareCancelled(e)) return false;
+      // A trip the file brought stays only with its map.
+      if (trip?.status === 'added') await this.delete(trip.route.id);
       throw e;
     }
   }
-
-  async importFromText(raw: string): Promise<SavedRoute> {
-    const parsed = parseRouteFile(raw);
-    return this.saveImported(parsed);
-  }
-
-  async importFromFile(file: File): Promise<SavedRoute> {
-    const raw = await file.text();
-    return this.importFromText(raw);
-  }
 }
 
-function downloadTextFile(fileName: string, body: string): void {
-  const blob = new Blob([body], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = fileName;
-  a.rel = 'noopener';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+/** What to tell the rider after an import. */
+export function importSummary({ route, routeStatus, map }: ImportOutcome): string {
+  if (!route) {
+    const name = map?.pack.name ?? 'offline';
+    if (map && map.added === 0 && !map.replaced) return `The “${name}” map was already up to date here`;
+    if (map && map.skipped > 0) {
+      return `Updated the “${name}” map · ${map.added} tiles added, ${map.skipped} already here`;
+    }
+    return `Saved the “${name}” map`;
+  }
+  const lead =
+    routeStatus === 'kept'
+      ? `“${route.name}” was already in Library`
+      : routeStatus === 'updated'
+        ? `Updated “${route.name}” to the newer copy`
+        : `Imported “${route.name}”`;
+  if (!map) return lead;
+  if (map.added === 0) return `${lead} · its map was already on this phone`;
+  if (map.skipped === 0) return `${lead} with its offline map`;
+  return `${lead} · ${map.added} map tiles added, ${map.skipped} already here`;
 }
 
-/** The Share plugin rejects with "Share canceled" when the sheet is dismissed. */
-function isShareCancelled(e: unknown): boolean {
-  return e instanceof Error && /cancel/i.test(e.message);
+function routeShareText(route: SavedRoute, extra?: string): ShareText {
+  return {
+    title: route.name,
+    text: [`TrailCompass route · ${formatKm(route.distanceMeters)}`, extra].filter(Boolean).join(' · '),
+    dialogTitle: 'Share route',
+  };
 }
 
 function formatKm(meters: number): string {

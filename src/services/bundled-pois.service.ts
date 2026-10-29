@@ -131,6 +131,51 @@ export async function bundledPoisNear(
   );
 }
 
+/**
+ * Bundled places inside a map view, for the fuel & food map layer.
+ * `covered` is false where the bundled data has no tiles (outside India),
+ * so the map shows OpenStreetMap's places there instead.
+ */
+export async function bundledPoisInBounds(
+  kind: PoiKind,
+  bbox: [west: number, south: number, east: number, north: number],
+  limit = 3_000,
+): Promise<{ places: PlaceHit[]; covered: boolean }> {
+  const loaded = await loadManifest();
+  const index = loaded?.manifest;
+  const available = new Set(index?.kinds[kind]?.tiles ?? []);
+  if (!loaded || !index || available.size === 0) return { places: [], covered: false };
+
+  const [west, south, east, north] = bbox;
+  const keys: string[] = [];
+  for (let x = Math.floor(west / index.tileDegrees); x <= Math.floor(east / index.tileDegrees); x++) {
+    for (let y = Math.floor(south / index.tileDegrees); y <= Math.floor(north / index.tileDegrees); y++) {
+      if (available.has(`${x}_${y}`)) keys.push(`${x}_${y}`);
+    }
+  }
+  // A view this wide is zoomed out too far to show places.
+  if (keys.length === 0 || keys.length > 6) return { places: [], covered: keys.length > 0 };
+
+  const places: PlaceHit[] = [];
+  const tileData = await Promise.all(keys.map((key) => loadTile(loaded.base, kind, key)));
+  tileData.forEach((tile, i) => {
+    if (!tile) return;
+    for (let offset = 0; offset + 2 < tile.p.length && places.length < limit; offset += 3) {
+      const lon = tile.p[offset]! / 1e5;
+      const lat = tile.p[offset + 1]! / 1e5;
+      if (lon < west || lon > east || lat < south || lat > north) continue;
+      places.push({
+        id: `ovt-${kind}-${keys[i]}-${offset / 3}`,
+        name: tile.names[tile.p[offset + 2]!] || '',
+        coordinate: [lon, lat],
+        subtitle: 'Overture Maps',
+        kind,
+      });
+    }
+  });
+  return { places, covered: true };
+}
+
 export function placesNear(
   tile: PoiTile,
   idPrefix: string,
