@@ -7,7 +7,9 @@
 # - Push to main that changes the landing page: republishes it, carrying
 #   over the data that is already live.
 # - Run workflow: republishes now; tick "force" to rebuild the data too.
-# - A new app release: republishes so the site serves its APK.
+# - A new app release: starts this workflow again on main, which republishes
+#   so the site serves its APK. A release run's ref is the tag, and the
+#   github-pages environment only accepts deploys from main.
 #
 # Site layout:
 #   index.html, styles.css, …    the landing page
@@ -45,7 +47,24 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Deploying from a release run is rejected ("Tag … is not allowed to deploy
+  # to github-pages due to environment protection rules"), so hand off to a
+  # run on the default branch. A workflow_dispatch started with GITHUB_TOKEN
+  # does start a new run.
+  release:
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Publish from the default branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.event.repository.default_branch }}
+        run: gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
+
   build:
+    if: github.event_name != 'release'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     outputs:
