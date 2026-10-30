@@ -3848,23 +3848,28 @@ button.tc-plan-point-row[aria-expanded='true'] {
   cursor: not-allowed;
 }
 
-.maplibregl-ctrl-top-right {
-  top: calc(var(--tc-pad) + var(--tc-safe-top)) !important;
-  right: calc(var(--tc-pad) + var(--tc-safe-right)) !important;
+/* Scoped to the map, every one: MapLibre's stylesheet comes after this one, and the
+   build's minifier deletes a rule (even !important) when a later one has the same
+   selector. index-css.test.ts holds this to it. */
+
+/* In line with the control column below it (.tc-map-rail). */
+.tc-map-container .maplibregl-ctrl-top-right {
+  top: calc(var(--tc-pad) + var(--tc-safe-top));
+  right: calc(var(--tc-pad) + var(--tc-safe-right));
 }
 
-.maplibregl-ctrl-top-right .maplibregl-ctrl {
-  margin: 0 !important;
+.tc-map-container .maplibregl-ctrl-top-right .maplibregl-ctrl {
+  margin: 0;
 }
 
 /* Above the trip card: the map's credit has to stay readable. */
-.maplibregl-ctrl-bottom-right,
-.maplibregl-ctrl-bottom-left {
+.tc-map-container .maplibregl-ctrl-bottom-right,
+.tc-map-container .maplibregl-ctrl-bottom-left {
   bottom: var(--tc-credit-inset, 0px) !important;
   margin-bottom: 0.35rem !important;
 }
 
-.maplibregl-ctrl-attrib {
+.tc-map-container .maplibregl-ctrl-attrib {
   background: rgba(6, 12, 10, 0.7) !important;
   color: var(--tc-muted) !important;
   font-size: 0.65rem !important;
@@ -3872,16 +3877,16 @@ button.tc-plan-point-row[aria-expanded='true'] {
   margin: 0 0.4rem 0.35rem !important;
 }
 
-.maplibregl-ctrl-attrib a {
+.tc-map-container .maplibregl-ctrl-attrib a {
   color: var(--tc-muted) !important;
 }
 
-.maplibregl-ctrl-logo {
+.tc-map-container .maplibregl-ctrl-logo {
   margin: 0 0.4rem 0.35rem !important;
   opacity: 0.7;
 }
 
-.maplibregl-ctrl-group {
+.tc-map-container .maplibregl-ctrl-group {
   background: var(--tc-panel) !important;
   border: 1px solid var(--tc-border) !important;
   border-radius: 12px !important;
@@ -3890,21 +3895,21 @@ button.tc-plan-point-row[aria-expanded='true'] {
   backdrop-filter: blur(12px);
 }
 
-.maplibregl-ctrl-group button {
+.tc-map-container .maplibregl-ctrl-group button {
   width: 44px !important;
   height: 44px !important;
   background-color: transparent !important;
 }
 
-.maplibregl-ctrl-group button:hover {
+.tc-map-container .maplibregl-ctrl-group button:hover {
   background-color: var(--tc-accent-soft) !important;
 }
 
-.maplibregl-ctrl-group button + button {
-  border-top: 1px solid var(--tc-border) !important;
+.tc-map-container .maplibregl-ctrl-group button + button {
+  border-top: 1px solid var(--tc-border);
 }
 
-.maplibregl-ctrl button .maplibregl-ctrl-icon {
+.tc-map-container .maplibregl-ctrl button .maplibregl-ctrl-icon {
   background-size: 20px 20px !important;
   /* MapLibre icons are dark; invert for our dark chrome */
   filter: invert(1) brightness(1.15);

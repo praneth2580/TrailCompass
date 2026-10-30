@@ -16,6 +16,8 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    // Empty by default, ?raw too. index-css.test.ts reads the real stylesheets.
+    css: { include: [/\.css\?raw$/] },
     // *.scratch.test.ts files query live OSM servers and can run for many
     // minutes. They only run with LIVE_OSM=1, e.g. `LIVE_OSM=1 npm test`.
     exclude: [
