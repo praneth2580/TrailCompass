@@ -1,8 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
+import { haversineMeters } from '../routing/geo';
 import { MapView } from '../components/MapView';
 import { CompassWidget } from '../components/CompassWidget';
+import { MapTripCard } from '../components/MapTripCard';
 import { NavigationBanner } from '../components/NavigationBanner';
+import { NorthButton } from '../components/NorthButton';
+import { StopPickerSheet } from '../components/StopPickerSheet';
 import { RouteOptionsPanel } from '../components/RouteOptionsPanel';
 import { PlanScreen } from '../components/PlanScreen';
 import { LibraryScreen } from '../components/LibraryScreen';
@@ -19,6 +23,7 @@ import type { RoutingProfileId } from '../routing/routing-profiles';
 import {
   locationService,
   formatGpsChipLabel,
+  gpsWarning,
   isFixStale,
 } from '../services/location.service';
 import { compassService } from '../services/compass.service';
@@ -33,6 +38,10 @@ import { mapPackService, routePackId } from '../services/map-pack.service';
 import { rideLogService, type LiveRide } from '../services/ride-log.service';
 import type { RideRecord } from '../database/ride-repository';
 import { RideSheet } from '../components/RideSheet';
+import type { RideLibraryView } from '../components/RideLogPanel';
+import { rideInsights } from '../services/ride-insights.service';
+import { TRAFFIC_COLORS, TRAFFIC_LEVELS } from '../services/ride-insights';
+import { TRAFFIC_LABELS } from '../services/ride-format';
 import { formatClock } from '../routing/route-naming';
 import type { LibraryTab } from '../components/LibraryScreen';
 import { voiceGuidance } from '../services/voice-guidance.service';
@@ -52,7 +61,7 @@ import {
 import type { CalculatedRoute, Coordinate } from '../routing/routing-adapter';
 import type { CompassReading, GpsFix, NavigationState } from '../types/navigation';
 import type { SavedPlaces, SavedRoute } from '../types/route';
-import { createTripStop, type StopKind } from '../types/trip-stop';
+import { createTripStop, type StopKind, type TripStop } from '../types/trip-stop';
 import {
   setBrowserFullscreen,
   useRideFullscreen,
@@ -143,6 +152,11 @@ export default function App() {
   /** A past ride drawn on the map from Library. */
   const [viewedRide, setViewedRide] = useState<RideRecord | null>(null);
   const [libraryTab, setLibraryTab] = useState<LibraryTab>('trips');
+  const [rideView, setRideView] = useState<RideLibraryView>({ grouping: 'rides', open: [] });
+  /** A route's usual traffic drawn on the map from Library. */
+  const [trafficView, setTrafficView] = useState<{ title: string } | null>(null);
+  /** "Where to?" open on the Map tab. */
+  const [destinationSearchOpen, setDestinationSearchOpen] = useState(false);
   const previewToken = useRef(0);
   const planTripKey = useRef<string | null>(null);
   const screenRef = useRef<AppScreen>(screen);
@@ -151,6 +165,9 @@ export default function App() {
   const lastBackAt = useRef(0);
   const zenTimer = useRef<number | undefined>(undefined);
   const zenLayerRef = useRef<HTMLDivElement>(null);
+  const dockRef = useRef<HTMLDivElement>(null);
+  const hudRef = useRef<HTMLElement>(null);
+  const mapAreaRef = useRef<HTMLElement>(null);
 
   const { rideMode, dismissRideMode } = useRideFullscreen({
     status: nav.status,
@@ -183,7 +200,16 @@ export default function App() {
       nav.status === 'rerouting');
 
   useEffect(() => {
+    let fedFix: GpsFix | null = null;
     const unsubLoc = locationService.subscribe((next, error) => {
+      // Before setFix, so each fix renders with its own spot on the route.
+      if (next && next !== fedFix) {
+        fedFix = next;
+        navigationService.updatePosition(
+          [next.longitude, next.latitude],
+          next.accuracyMeters,
+        );
+      }
       setFix(next);
       setLocationError(error);
     });
@@ -275,14 +301,6 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!fix) return;
-    navigationService.updatePosition(
-      [fix.longitude, fix.latitude],
-      fix.accuracyMeters,
-    );
-  }, [fix]);
-
-  useEffect(() => {
     // Browser fullscreen only once motion confirms a ride.
     void setBrowserFullscreen(rideMode && screen === 'map');
     return () => {
@@ -293,6 +311,42 @@ export default function App() {
   useEffect(() => {
     screenRef.current = screen;
   }, [screen]);
+
+  /** Tells the map how much of it the panels cover, top and bottom. */
+  const measurePanels = useCallback(() => {
+    const dock = dockRef.current;
+    const hud = hudRef.current;
+    const area = mapAreaRef.current;
+    const dockInset = dock && area ? Math.max(0, area.clientHeight - dock.offsetTop) : 0;
+    // Wide screens and landscape keep the card down the left, leaving the rest of the map.
+    const sideCard = dock != null && area != null && dock.offsetWidth < area.clientWidth * 0.6;
+    mapService.setBottomInset(dockInset);
+    mapService.setTopInset(hud ? hud.offsetTop + hud.offsetHeight : 0);
+    mapService.setSideInset(sideCard ? dock.offsetLeft + dock.offsetWidth : 0);
+    area?.style.setProperty('--tc-dock-inset', `${dockInset}px`);
+    // The map credit sits in the bottom corner: above the card only when it's along the bottom.
+    area?.style.setProperty('--tc-credit-inset', `${sideCard ? 0 : dockInset}px`);
+  }, []);
+
+  // The navigation camera keeps the rider above the banner, however tall it grows.
+  useEffect(() => {
+    const observer = new ResizeObserver(measurePanels);
+    for (const panel of [dockRef.current, hudRef.current, mapAreaRef.current]) {
+      if (panel) observer.observe(panel);
+    }
+    measurePanels();
+    return () => observer.disconnect();
+  }, [mapPickActive, measurePanels]);
+
+  // The routes on offer, in what the taller card leaves of the map.
+  const routesOnOffer = nav.status === 'choosing' ? nav.alternatives : null;
+  useEffect(() => {
+    if (!routesOnOffer) return;
+    measurePanels();
+    const shown = routesOnOffer.flatMap((route) => route.coordinates);
+    const active = navigationService.getActiveCalculatedRoute();
+    mapService.fitRoute(shown.length > 0 ? shown : (active?.coordinates ?? []));
+  }, [routesOnOffer, measurePanels]);
 
   useEffect(() => {
     const planningNow = planBusy || nav.status === 'planning';
@@ -317,16 +371,8 @@ export default function App() {
 
   const stale = fix ? isFixStale(fix, now) : false;
   const gpsTone = !fix || locationError ? 'missing' : stale ? 'stale' : 'ok';
+  const navGpsWarning = navMode ? gpsWarning(fix, now) : null;
   const canPlan = Boolean(nav.destination) && engine.ready;
-  const showRouteOptions =
-    Boolean(nav.destination) &&
-    (nav.status === 'idle' ||
-      nav.status === 'choosing' ||
-      nav.status === 'error' ||
-      nav.status === 'arrived') &&
-    !navMode &&
-    !mapPickActive;
-
   const resolveStart = (): Coordinate => {
     if (fix) return [fix.longitude, fix.latitude];
     const last = locationService.getLastFix();
@@ -392,11 +438,39 @@ export default function App() {
       return;
     }
 
+    // A route on offer or stops planned: one stray tap mustn't undo that work.
+    const hasStops = tripPlanner.getState().stops.length > 0;
+    if (nav.status === 'choosing' || nav.status === 'planning' || hasStops) {
+      setToast({
+        message: hasStops ? 'Change the destination on the Plan tab' : 'Clear this trip to choose somewhere else',
+        tone: 'info',
+      });
+      return;
+    }
+
     setFollowGps(false);
     mapService.setDestination(coordinate);
     navigationService.setDestination(coordinate);
-    tripPlanner.setDestinationFromCoordinate(coordinate, 'Map pin');
+    tripPlanner.setDestinationFromCoordinate(coordinate, 'Dropped pin');
     mapService.clearItineraryStops();
+  };
+
+  /** From "Where to?": the place on the card, with the rider and it both in view. */
+  const handleDestinationPicked = (stop: TripStop) => {
+    setDestinationSearchOpen(false);
+    tripPlanner.setDestination(stop);
+    navigationService.setDestination(stop.coordinate);
+    syncItineraryMarkers();
+    setFollowGps(false);
+    const [lon, lat] = stop.coordinate;
+    const here = locationService.getLastFix();
+    const lons = here ? [lon, here.longitude] : [lon - 0.01, lon + 0.01];
+    const lats = here ? [lat, here.latitude] : [lat - 0.01, lat + 0.01];
+    // Once the card for it is on screen.
+    window.setTimeout(() => {
+      measurePanels();
+      mapService.fitBetweenPanels(Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats));
+    }, 80);
   };
 
   const handlePoiAction = (poi: MapPoi, action: PoiAction) => {
@@ -556,12 +630,7 @@ export default function App() {
     }
     navigationService.startNavigation(index);
     setFollowGps(true);
-    if (fix) {
-      mapService.resumeNavigationFollow(
-        [fix.longitude, fix.latitude],
-        fix.headingDegrees,
-      );
-    }
+    if (fix) mapService.resumeNavigationFollow();
   };
 
   const handleRecenterNavigation = () => {
@@ -570,10 +639,7 @@ export default function App() {
       return;
     }
     setFollowGps(true);
-    mapService.resumeNavigationFollow(
-      [fix.longitude, fix.latitude],
-      fix.headingDegrees,
-    );
+    mapService.resumeNavigationFollow();
   };
 
   const replanAfterOptionChange = () => {
@@ -614,7 +680,14 @@ export default function App() {
 
   const handleGoToMyLocation = () => {
     if (!fix) {
-      void locationService.startWatching();
+      void locationService.startWatching().then(() =>
+        setToast({
+          message: locationService.wasPermissionDenied()
+            ? 'Allow location for TrailCompass in your phone settings'
+            : 'Waiting for GPS…',
+          tone: 'info',
+        }),
+      );
       return;
     }
     setFollowGps(true);
@@ -659,9 +732,20 @@ export default function App() {
 
   const closeZenMode = () => stepZen('leaving', 'off', ZEN_LEAVE_MS);
 
+  const hideViewedRide = () => {
+    rideLogService.hideFromMap();
+    setViewedRide(null);
+  };
+
+  const hideTraffic = () => {
+    rideInsights.hideTraffic();
+    setTrafficView(null);
+  };
+
   /**
    * Android back: close the open sheet, then leave map-pick or ride view,
-   * then return to the Map tab. Mid-navigation, leaving needs a second press.
+   * then return to the Map tab, or to Library from a ride or traffic opened
+   * there. Mid-navigation, leaving needs a second press.
    */
   const handleBack = () => {
     if (handleOverlayBack()) return;
@@ -681,6 +765,14 @@ export default function App() {
     }
     if (screen !== 'map') {
       setScreen('map');
+      return;
+    }
+    // Looking at a ride or traffic from Library: back to where it was opened.
+    if (viewedRide || trafficView) {
+      hideViewedRide();
+      hideTraffic();
+      setLibraryTab('rides');
+      setScreen('library');
       return;
     }
     if (navMode) {
@@ -748,16 +840,27 @@ export default function App() {
   };
 
   const handleShowRide = (picked: RideRecord) => {
+    hideTraffic();
     setViewedRide(picked);
     setFollowGps(false);
     setScreen('map');
     // After the map is on screen, so it frames the ride at its real size.
-    window.setTimeout(() => void rideLogService.showOnMap(picked), 80);
+    window.setTimeout(() => {
+      measurePanels();
+      void rideLogService.showOnMap(picked);
+    }, 80);
   };
 
-  const hideViewedRide = () => {
-    rideLogService.hideFromMap();
-    setViewedRide(null);
+  const handleShowTraffic = (title: string, draw: () => void) => {
+    hideViewedRide();
+    setTrafficView({ title });
+    setFollowGps(false);
+    setScreen('map');
+    // After the map is on screen, as for a ride.
+    window.setTimeout(() => {
+      measurePanels();
+      draw();
+    }, 80);
   };
 
   const openSaveShareSheet = (mode: SaveShareMode) => {
@@ -910,6 +1013,7 @@ export default function App() {
     >
       {/* Always mounted so switching tabs does not reload the map. */}
       <main
+        ref={mapAreaRef}
         className="tc-main tc-main-map"
         data-hidden={screen !== 'map' ? 'true' : undefined}
         inert={screen !== 'map'}
@@ -919,6 +1023,7 @@ export default function App() {
           visible={screen === 'map'}
           followGps={followGps}
           navigating={navMode}
+          routeMatch={nav.offRoute ? undefined : nav.matched}
           onMapClick={handleMapClick}
           onFollowBreak={() => setFollowGps(false)}
           onRoutePick={(index) => {
@@ -976,78 +1081,85 @@ export default function App() {
             </svg>
             <span>Recenter</span>
           </button>
-        ) : !immersive ? (
-          <button
-            type="button"
-            className="tc-locate-btn"
-            onClick={handleGoToMyLocation}
-            disabled={!fix}
-            aria-label="Go to my location"
-            title={fix ? 'Go to my location' : 'Waiting for GPS…'}
-          >
-            <svg
-              viewBox="0 0 24 24"
-              width="22"
-              height="22"
-              fill="none"
-              aria-hidden
+        ) : null}
+
+        <div className="tc-map-rail">
+          {!immersive ? (
+            <>
+              <NorthButton />
+              <button
+                type="button"
+                className="tc-locate-btn"
+                onClick={handleGoToMyLocation}
+                data-following={fix && followGps ? 'true' : undefined}
+                aria-label="Go to my location"
+                title="Go to my location"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="22"
+                  height="22"
+                  fill="none"
+                  aria-hidden
+                >
+                  <path
+                    d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  />
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="7"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  />
+                  <circle cx="12" cy="12" r="2.75" fill="currentColor" />
+                </svg>
+              </button>
+            </>
+          ) : null}
+
+          {!zenMode ? (
+            <button
+              type="button"
+              className="tc-locate-btn tc-poi-btn"
+              aria-pressed={overlaysOn}
+              aria-label={overlaysOn ? 'Hide map overlays' : 'Show map overlays'}
+              title="Map overlays"
+              onClick={() => mapService.setOverlaysShown(!overlaysOn)}
             >
-              <path
-                d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-              />
-              <circle
-                cx="12"
-                cy="12"
-                r="7"
-                stroke="currentColor"
-                strokeWidth="2"
-              />
-              <circle cx="12" cy="12" r="2.75" fill="currentColor" />
-            </svg>
-          </button>
-        ) : null}
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden>
+                <path
+                  d="M12 3 2.5 8 12 13l9.5-5L12 3ZM2.5 12 12 17l9.5-5M2.5 16 12 21l9.5-5"
+                  stroke="currentColor"
+                  strokeWidth="1.9"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          ) : null}
 
-        {!zenMode ? (
-          <button
-            type="button"
-            className="tc-locate-btn tc-poi-btn"
-            aria-pressed={overlaysOn}
-            aria-label={overlaysOn ? 'Hide map overlays' : 'Show map overlays'}
-            title="Map overlays"
-            onClick={() => mapService.setOverlaysShown(!overlaysOn)}
-          >
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden>
-              <path
-                d="M12 3 2.5 8 12 13l9.5-5L12 3ZM2.5 12 12 17l9.5-5M2.5 16 12 21l9.5-5"
-                stroke="currentColor"
-                strokeWidth="1.9"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
-        ) : null}
+          {!zenMode ? (
+            <button
+              type="button"
+              className="tc-locate-btn tc-rec-btn"
+              data-state={ride?.state ?? 'idle'}
+              aria-label={ride ? 'Ride recording: open controls' : 'Record a ride'}
+              title={ride ? 'Ride recording' : 'Record ride'}
+              onClick={() => void handleRecordButton()}
+            >
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden>
+                <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.9" />
+                <circle className="tc-rec-btn-dot" cx="12" cy="12" r="4.2" fill="currentColor" />
+              </svg>
+            </button>
+          ) : null}
+        </div>
 
-        {!zenMode ? (
-          <button
-            type="button"
-            className="tc-locate-btn tc-rec-btn"
-            data-state={ride?.state ?? 'idle'}
-            aria-label={ride ? 'Ride recording: open controls' : 'Record a ride'}
-            title={ride ? 'Ride recording' : 'Record ride'}
-            onClick={() => void handleRecordButton()}
-          >
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden>
-              <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.9" />
-              <circle className="tc-rec-btn-dot" cx="12" cy="12" r="4.2" fill="currentColor" />
-            </svg>
-          </button>
-        ) : null}
-
-        <aside className="tc-hud" aria-label="Status">
+        <aside className="tc-hud" aria-label="Status" ref={hudRef}>
           <div
             className={`tc-gps-chip tc-gps-chip-${gpsTone}`}
             role="status"
@@ -1058,7 +1170,7 @@ export default function App() {
             <span className="tc-gps-chip-value">
               {formatGpsChipLabel(fix, locationError, { stale })}
             </span>
-            {fix?.speedMps != null && fix.speedMps >= 0 ? (
+            {fix?.speedMps != null && fix.speedMps >= 0.5 ? (
               <span className="tc-gps-chip-speed">
                 {formatSpeedKmh(fix.speedMps)}
               </span>
@@ -1086,6 +1198,31 @@ export default function App() {
                   <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
                 </svg>
               </button>
+            </div>
+          ) : null}
+          {trafficView ? (
+            <div className="tc-traffic-key" role="status">
+              <div className="tc-traffic-key-head">
+                <span>
+                  <strong>{trafficView.title}</strong>
+                  <small>Usual speed</small>
+                </span>
+                <button type="button" aria-label="Hide traffic" onClick={hideTraffic}>
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" aria-hidden>
+                    <path d="M6 6l12 12M18 6 6 18" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
+                  </svg>
+                </button>
+              </div>
+              <ul>
+                {TRAFFIC_LEVELS.map(({ level }) => (
+                  <li key={level}>
+                    <i style={{ background: TRAFFIC_COLORS[level] }} aria-hidden />
+                    <span>
+                      {TRAFFIC_LABELS[level].name} <small>{TRAFFIC_LABELS[level].speeds}</small>
+                    </span>
+                  </li>
+                ))}
+              </ul>
             </div>
           ) : null}
         </aside>
@@ -1117,44 +1254,73 @@ export default function App() {
         ) : null}
 
         {!mapPickActive ? (
-          <div className="tc-map-dock">
-            <RouteOptionsPanel
-              visible={showRouteOptions}
-              profile={nav.profile ?? 'fastest'}
-              alternatives={routeOutdated ? [] : (nav.alternatives ?? [])}
-              selectedIndex={nav.selectedAlternativeIndex ?? 0}
-              showAllRoutes={nav.showAllRoutes === true}
-              onProfileChange={handleProfileChange}
-              allowExpressways={allowExpressways}
-              onAllowExpresswaysChange={handleAllowExpresswaysChange}
-              voiceGuidance={voiceOn}
-              onVoiceGuidanceChange={handleVoiceGuidanceChange}
-              onSelectAlternative={(index) =>
-                navigationService.selectAlternative(index)
-              }
-              onStartNavigation={handleStartNavigation}
-              onToggleShowAll={(showAll) =>
-                navigationService.setShowAllRoutes(showAll)
-              }
-            />
-
-            <NavigationBanner
-              state={nav}
-              canPlan={canPlan}
-              navMode={navMode}
-              rideMode={rideMode}
-              canSaveRoute={canSaveRoute}
-              routeOutdated={routeOutdated}
-              onPlan={handlePlanRoute}
-              onRunInBackground={canRunInBackground ? handleRunInBackground : undefined}
-              onStart={() => handleStartNavigation()}
-              onStop={handleStop}
-              onExitRide={dismissRideMode}
-              onSaveRoute={() => openSaveShareSheet('save')}
-              onShareRoute={() => openSaveShareSheet('share')}
-            />
+          <div className="tc-map-dock" ref={dockRef}>
+            {navMode || rideMode || nav.status === 'paused' ? (
+              <NavigationBanner
+                state={nav}
+                canPlan={canPlan}
+                navMode={navMode}
+                rideMode={rideMode}
+                gpsWarning={navGpsWarning}
+                nowMs={now}
+                canSaveRoute={canSaveRoute}
+                routeOutdated={routeOutdated}
+                onPlan={handlePlanRoute}
+                onRunInBackground={canRunInBackground ? handleRunInBackground : undefined}
+                onStart={() => handleStartNavigation()}
+                onStop={handleStop}
+                onExitRide={dismissRideMode}
+                onSaveRoute={() => openSaveShareSheet('save')}
+                onShareRoute={() => openSaveShareSheet('share')}
+              />
+            ) : (
+              <MapTripCard
+                state={nav}
+                destinationName={itinerary.destination?.name ?? (nav.destination ? 'Dropped pin' : null)}
+                stopCount={itinerary.stops.length}
+                awayMeters={gpsCoordinate && tripDestination ? haversineMeters(gpsCoordinate, tripDestination) : null}
+                canPlan={canPlan}
+                routingNote={engine.ready ? null : (engine.message ?? null)}
+                routeOutdated={routeOutdated}
+                nowMs={now}
+                canSave={canSaveRoute}
+                options={
+                  <RouteOptionsPanel
+                    profile={nav.profile ?? 'fastest'}
+                    onProfileChange={handleProfileChange}
+                    allowExpressways={allowExpressways}
+                    onAllowExpresswaysChange={handleAllowExpresswaysChange}
+                    voiceGuidance={voiceOn}
+                    onVoiceGuidanceChange={handleVoiceGuidanceChange}
+                  />
+                }
+                onSearch={() => setDestinationSearchOpen(true)}
+                onClear={handleClearTrip}
+                onEditTrip={() => setScreen('plan')}
+                onPlan={handlePlanRoute}
+                onRunInBackground={canRunInBackground ? handleRunInBackground : undefined}
+                onStop={handleStop}
+                onStart={() => handleStartNavigation()}
+                onSelectRoute={(index) => navigationService.selectAlternative(index)}
+                onSave={() => openSaveShareSheet('save')}
+                onShare={() => openSaveShareSheet('share')}
+              />
+            )}
           </div>
         ) : null}
+
+        <StopPickerSheet
+          open={destinationSearchOpen}
+          mode="destination"
+          near={gpsCoordinate}
+          gpsCoordinate={gpsCoordinate}
+          onClose={() => setDestinationSearchOpen(false)}
+          onPick={handleDestinationPicked}
+          onPickOnMap={() => {
+            setDestinationSearchOpen(false);
+            setToast({ message: 'Tap the map to drop a pin', tone: 'info' });
+          }}
+        />
 
         <RideSheet
           ride={ride}
@@ -1243,8 +1409,11 @@ export default function App() {
             onOpenRoute={handleOpenSavedRoute}
             onPlanTrip={() => setScreen('plan')}
             onShowRide={handleShowRide}
+            onShowTraffic={handleShowTraffic}
             tab={libraryTab}
             onTabChange={setLibraryTab}
+            rideView={rideView}
+            onRideViewChange={setRideView}
           />
           {toast ? (
             <StatusToast message={toast.message} tone={toast.tone} />

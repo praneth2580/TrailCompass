@@ -245,7 +245,7 @@ export class RideLogService {
     const segments = await this.track(ride);
     mapService.setRideLine('view', segments.map((segment) => segment.map((fix) => [fix.lon, fix.lat] as Coordinate)));
     const [west, south, east, north] = ride.bbox;
-    mapService.fitBounds(west, south, east, north, 56);
+    mapService.fitBetweenPanels(west, south, east, north);
   }
 
   hideFromMap(): void {

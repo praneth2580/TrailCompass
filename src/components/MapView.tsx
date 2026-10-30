@@ -1,10 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import {
-  mapService,
-  NAVIGATION_FOLLOW_ZOOM,
-} from '../services/map.service';
-import type { GpsFix } from '../types/navigation';
+import { mapService } from '../services/map.service';
+import { riderHeadingDegrees } from '../services/nav-display';
+import type { GpsFix, NavigationState } from '../types/navigation';
 import type { Coordinate } from '../routing/routing-adapter';
 
 interface MapViewProps {
@@ -12,8 +10,13 @@ interface MapViewProps {
   /** False while another tab is shown; the map stays mounted behind it. */
   visible?: boolean;
   followGps?: boolean;
-  /** When true, show a heading arrow instead of the idle GPS dot. */
+  /**
+   * When true, show a heading arrow instead of the idle GPS dot, and turn
+   * and tilt the camera with the rider.
+   */
   navigating?: boolean;
+  /** The rider's spot on the route while navigating on it: drawn instead of the raw fix. */
+  routeMatch?: NavigationState['matched'];
   onMapClick?: (coordinate: Coordinate) => void;
   onRoutePick?: (index: number) => void;
   /** User panned/zoomed the map — stop auto-centering. */
@@ -25,6 +28,7 @@ export function MapView({
   visible = true,
   followGps = true,
   navigating = false,
+  routeMatch,
   onMapClick,
   onRoutePick,
   onFollowBreak,
@@ -89,15 +93,19 @@ export function MapView({
 
   useEffect(() => {
     if (!readyRef.current || !fix) return;
-    // Always move the marker; camera only follows when followGps is on.
-    // While navigating, keep a fixed street-level zoom. Re-runs when the
-    // map is shown again so the camera catches up with the rider.
-    mapService.showPosition([fix.longitude, fix.latitude], fix.headingDegrees, {
-      follow: followGps,
-      lockZoom:
-        navigating && followGps ? NAVIGATION_FOLLOW_ZOOM : undefined,
-    });
-  }, [fix, followGps, navigating, visible]);
+    // Always move the marker; the camera only follows when followGps is on.
+    // On the route the rider is drawn on the road, pointing along it.
+    const match = navigating ? routeMatch : undefined;
+    mapService.showPosition(
+      match?.coordinate ?? [fix.longitude, fix.latitude],
+      riderHeadingDegrees({
+        courseDegrees: fix.headingDegrees,
+        speedMps: fix.speedMps,
+        routeBearingDegrees: match?.bearingDegrees,
+      }),
+      { speedMps: fix.speedMps },
+    );
+  }, [fix, navigating, routeMatch]);
 
   const showBadge = !status.ok;
 

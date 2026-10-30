@@ -66,6 +66,30 @@ describe('NavigationService planned trip', () => {
     expect(nav.isPlannedTo(andheri)).toBe(false);
   });
 
+  it('places the rider on the road while on the route, and not once off it', async () => {
+    const nav = new NavigationService(straightLines);
+    await nav.planRoute(goregaon, andheri);
+    nav.startNavigation();
+
+    // ~15 m beside the road, a fifth of the way along.
+    const beside: Coordinate = [
+      goregaon[0] + (andheri[0] - goregaon[0]) * 0.2 + 0.00014,
+      goregaon[1] + (andheri[1] - goregaon[1]) * 0.2,
+    ];
+    nav.updatePosition(beside, 8);
+    const matched = nav.getState().matched;
+    expect(matched).toBeDefined();
+    expect(haversineMeters(matched!.coordinate, beside)).toBeGreaterThan(5);
+    expect(haversineMeters(matched!.coordinate, beside)).toBeLessThan(25);
+    // The road runs south-south-east from Goregaon to Andheri.
+    expect(matched!.bearingDegrees).toBeGreaterThan(150);
+    expect(matched!.bearingDegrees).toBeLessThan(170);
+
+    const farOff: Coordinate = [beside[0] + 0.01, beside[1]];
+    nav.updatePosition(farOff, 8);
+    expect(nav.getState().matched).toBeUndefined();
+  });
+
   it('treats an opened saved route as planned to its destination', () => {
     const nav = new NavigationService(straightLines);
     nav.loadSavedRoute({

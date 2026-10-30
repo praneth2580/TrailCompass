@@ -131,6 +131,19 @@ describe('simplify', () => {
       [19 + 49 * LAT_STEP, 72.8 + 50 * LAT_STEP],
     ]);
   });
+
+  it('keeps a stop on a straight road when timing counts', () => {
+    const before = ride(100, 10);
+    const stopped = before[before.length - 1]!;
+    const after = ride(100, 10, { lat: stopped.lat, t: stopped.t + 60_000 });
+    // Standing a minute: the same spot, a minute apart.
+    const points = [...before, ...after];
+    expect(simplify(points, 3)).toHaveLength(2);
+    const kept = simplify(points, 3, 25);
+    expect(kept.map((p) => p.t)).toContain(stopped.t);
+    expect(kept.map((p) => p.t)).toContain(stopped.t + 60_000);
+    expect(kept.length).toBeLessThan(6);
+  });
 });
 
 describe('stored tracks', () => {

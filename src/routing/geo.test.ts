@@ -7,6 +7,7 @@ import {
   projectOntoPolyline,
   remainingFromProjectionMeters,
   samplePolylineMeters,
+  segmentBearingDegrees,
 } from './geo';
 
 const LAT = 48.86;
@@ -100,5 +101,26 @@ describe('samplePolylineMeters', () => {
     expect(samples[0]!.alongMeters).toBe(0);
     expect(samples[samples.length - 1]!.alongMeters).toBeCloseTo(total, 3);
     expect(samples[samples.length - 1]!.coordinate).toEqual([74, 18]);
+  });
+});
+
+describe('segmentBearingDegrees', () => {
+  const route = [offset(0), offset(100), offset(100), offset(100, 100)];
+
+  it('is the direction of travel along the segment', () => {
+    expect(segmentBearingDegrees(route, 0)).toBeCloseTo(90, 0);
+    expect(segmentBearingDegrees(route, 2)).toBeCloseTo(0, 0);
+  });
+
+  it('skips a repeated vertex to the next real segment', () => {
+    expect(segmentBearingDegrees(route, 1)).toBeCloseTo(0, 0);
+  });
+
+  it('looks back from the end of the route', () => {
+    expect(segmentBearingDegrees(route, 3)).toBeCloseTo(0, 0);
+  });
+
+  it('has no direction for a single point', () => {
+    expect(segmentBearingDegrees([offset(0)], 0)).toBeNull();
   });
 });

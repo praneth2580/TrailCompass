@@ -40,6 +40,31 @@ export function isFixStale(fix: GpsFix, now = Date.now()): boolean {
   return now - fix.timestampMs > STALE_MS;
 }
 
+/** No fix for this long while moving: the signal is gone (tunnel, dense cover). */
+const SIGNAL_LOST_MS = 10_000;
+/**
+ * Android quietens a still phone's GPS, so a quiet GPS only counts as lost
+ * when the last fix was moving (~5 km/h), not at a red light.
+ */
+const SIGNAL_LOST_MIN_SPEED_MPS = 1.5;
+/** Fixes vaguer than this are flagged as a weak signal. */
+const WEAK_ACCURACY_M = 50;
+
+export type GpsWarning = 'weak' | 'lost';
+
+/** A warning for the navigation banner, or null while the GPS is fine. */
+export function gpsWarning(fix: GpsFix | null, now = Date.now()): GpsWarning | null {
+  if (!fix) return 'lost';
+  if (
+    now - fix.timestampMs >= SIGNAL_LOST_MS &&
+    (fix.speedMps ?? 0) >= SIGNAL_LOST_MIN_SPEED_MPS
+  ) {
+    return 'lost';
+  }
+  if (fix.accuracyMeters != null && fix.accuracyMeters > WEAK_ACCURACY_M) return 'weak';
+  return null;
+}
+
 export function formatAccuracy(fix: GpsFix | null): string {
   if (!fix) return 'No fix';
   if (fix.accuracyMeters == null) return 'Accuracy unknown';

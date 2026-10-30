@@ -48,6 +48,11 @@ export interface NavigationState {
   remainingDistanceMeters?: number;
   remainingDurationSeconds?: number;
   offRoute: boolean;
+  /**
+   * The rider's spot on the route and the road's direction there, while
+   * navigating on it. The map draws the rider here instead of the raw fix.
+   */
+  matched?: { coordinate: Coordinate; bearingDegrees: number | null };
   message?: string;
   /** Present while planning/rerouting; percent only when realistically known. */
   progress?: RoutingProgress;

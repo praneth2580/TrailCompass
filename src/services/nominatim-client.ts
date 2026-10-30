@@ -2,6 +2,7 @@ import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { abortError, throwIfAborted } from '../routing/abort';
 
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
+const NOMINATIM_REVERSE_URL = 'https://nominatim.openstreetmap.org/reverse';
 /** Nominatim's usage policy allows at most one request per second. */
 const NOMINATIM_MIN_INTERVAL_MS = 1_000;
 const NOMINATIM_TIMEOUT_MS = 15_000;
@@ -57,10 +58,45 @@ export async function nominatimSearch(
   params: Record<string, string>,
   signal?: AbortSignal,
 ): Promise<NominatimResult[]> {
+  const data = await nominatimGet(NOMINATIM_URL, params, signal);
+  return Array.isArray(data) ? (data as NominatimResult[]) : [];
+}
+
+/** Parts of an address, as Nominatim names them (with addressdetails=1). */
+export type NominatimAddress = Partial<
+  Record<
+    | 'road'
+    | 'neighbourhood'
+    | 'quarter'
+    | 'suburb'
+    | 'hamlet'
+    | 'village'
+    | 'town'
+    | 'city'
+    | 'county',
+    string
+  >
+>;
+
+/** One Nominatim /reverse call (jsonv2): what is at a point. Null where nothing is. */
+export async function nominatimReverse(
+  params: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<(NominatimResult & { address?: NominatimAddress }) | null> {
+  const data = await nominatimGet(NOMINATIM_REVERSE_URL, params, signal);
+  if (!data || typeof data !== 'object' || 'error' in data) return null;
+  return data as NominatimResult & { address?: NominatimAddress };
+}
+
+async function nominatimGet(
+  endpoint: string,
+  params: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<unknown> {
   throwIfAborted(signal);
   await waitForNominatimSlot(signal);
   throwIfAborted(signal);
-  const url = `${NOMINATIM_URL}?${new URLSearchParams({ format: 'jsonv2', ...params })}`;
+  const url = `${endpoint}?${new URLSearchParams({ format: 'jsonv2', ...params })}`;
 
   if (Capacitor.isNativePlatform()) {
     const response = await CapacitorHttp.get({
@@ -73,9 +109,7 @@ export async function nominatimSearch(
     if (response.status < 200 || response.status >= 300) {
       throw new Error(`Nominatim HTTP ${response.status}`);
     }
-    const data: unknown =
-      typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
-    return Array.isArray(data) ? (data as NominatimResult[]) : [];
+    return typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
   }
 
   const timeout = new AbortController();
@@ -88,8 +122,7 @@ export async function nominatimSearch(
       signal: timeout.signal,
     });
     if (!response.ok) throw new Error(`Nominatim HTTP ${response.status}`);
-    const data: unknown = await response.json();
-    return Array.isArray(data) ? (data as NominatimResult[]) : [];
+    return (await response.json()) as unknown;
   } catch (e) {
     throwIfAborted(signal);
     if (timeout.signal.aborted) throw new Error('Nominatim timed out');

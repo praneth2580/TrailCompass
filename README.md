@@ -33,6 +33,7 @@ TrailCompass keeps you on roads bikes are allowed on, speaks every turn into you
 - **Built for the handlebar.** A full-screen ride view while you're moving, a screen that stays on, and large touch targets that are easy to hit. Tap the compass for zen mode: just the map, your route and a big compass.
 - **Plans while you do other things.** Every route plan shows its progress in a notification, with Pause and Stop, so you can leave the app while it works. Set downloads to Wi-Fi only to save mobile data.
 - **A log of every ride.** Tap record on the map, or let navigation record for you. It keeps recording with the screen off or the app closed, and saves your track with distance, moving time, average and top speed and climb. Export it as GPX, or keep its path as a trip to ride again.
+- **See how your regular routes really go.** Rides on the same roads are sorted into routes, and rides to the same place into places. Compare how long each way usually takes, see when it's quickest to set off, and find the stretches where traffic slows you, drawn on the map.
 - **Choose your GPS.** Satellites only, for no mobile data at all; satellites with mobile data and Wi-Fi, for the quickest and most precise fix; or a battery saver.
 - **Save and share rides.** Keep trips in your library and open them later without planning again. A saved trip keeps the map along its route, so it shows without signal. Share a route with your riding group as one file, map included.
 - **Always up to date.** TrailCompass tells you when a new version is out and installs it from inside the app. Fuel and food data refreshes every month on its own.
@@ -88,7 +89,7 @@ Maps, roads and search come from OpenStreetMap, through OpenFreeMap, Overpass an
 <details>
 <summary><strong>Does it collect my data?</strong></summary>
 
-There's no account and no analytics. To show the map and plan routes, the app downloads data for the areas you use from the open-data services above.
+There's no account and no analytics. To show the map and plan routes, the app downloads data for the areas you use from the open-data services above. To name the places you ride to more than once, it asks Nominatim about them, with the position rounded to about 100 m, unless the name is already known from your trips; the answer is kept on your phone.
 </details>
 
 ## Ride safe

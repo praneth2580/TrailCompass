@@ -1,18 +1,45 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { rideRepository, type RideRecord } from '../database/ride-repository';
+import { useBackHandler } from '../hooks/useBackHandler';
+import { useRideGroups } from '../hooks/useRideGroups';
 import { formatEtaShort } from '../routing/route-naming';
 import { LOCATION_SOURCES } from '../services/location.service';
+import { formatKm } from '../services/ride-format';
+import type { RideGroups } from '../services/ride-insights.service';
 import { rideLogService } from '../services/ride-log.service';
 import type { StoredTrack } from '../services/ride-track';
+import { PlaceInsightsPanel } from './PlaceInsightsPanel';
+import { RidePlacesList, RideRoutesList } from './RideGroupLists';
+import { RouteInsightsPanel } from './RouteInsightsPanel';
 import { TrackThumbnail } from './TrackThumbnail';
 
+/** How the ride log is listed: ride by ride, by route, or by place. */
+export type RideGrouping = 'rides' | 'routes' | 'places';
+
+/** What the Rides tab shows; kept by the app, so it's still there after a look at the map. */
+export interface RideLibraryView {
+  grouping: RideGrouping;
+  /** Open routes and places, the one on screen last. */
+  open: Array<{ kind: 'route' | 'place'; id: string }>;
+}
+
 interface RideLogPanelProps {
+  view: RideLibraryView;
+  onViewChange: (view: RideLibraryView) => void;
   /** Opens the map with the ride drawn on it. */
   onShowRide: (ride: RideRecord) => void;
+  /** Opens the map with a route's traffic, drawn by `draw`. */
+  onShowTraffic: (title: string, draw: () => void) => void;
   /** A ride was kept as a trip. */
   onTripSaved?: () => void;
 }
+
+const GROUPINGS: Array<{ id: RideGrouping; label: string }> = [
+  { id: 'rides', label: 'Rides' },
+  { id: 'routes', label: 'Routes' },
+  { id: 'places', label: 'Places' },
+];
 
 interface Notice {
   text: string;
@@ -21,9 +48,14 @@ interface Notice {
   undo?: { ride: RideRecord; track: StoredTrack | null };
 }
 
-/** Recorded rides, newest first. */
-export function RideLogPanel({ onShowRide, onTripSaved }: RideLogPanelProps) {
+/** Recorded rides: newest first, or sorted into routes and places. */
+export function RideLogPanel({ view, onViewChange, onShowRide, onShowTraffic, onTripSaved }: RideLogPanelProps) {
   const [rides, setRides] = useState<RideRecord[] | null>(null);
+  const top = view.open[view.open.length - 1] ?? null;
+  const { groups, error: groupsError } = useRideGroups(view.grouping !== 'rides' || top != null);
+  const close = () => onViewChange({ ...view, open: view.open.slice(0, -1) });
+  const open = (kind: 'route' | 'place', id: string) => onViewChange({ ...view, open: [...view.open, { kind, id }] });
+  useBackHandler(top != null, close);
   const [busy, setBusy] = useState<{ id: string; action: 'gpx' | 'trip' | 'delete' } | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
 
@@ -90,6 +122,25 @@ export function RideLogPanel({ onShowRide, onTripSaved }: RideLogPanelProps) {
   const total = (rides ?? []).reduce((sum, ride) => sum + ride.distanceMeters, 0);
   const anyBusy = busy != null;
 
+  if (top) {
+    return (
+      <section className="tc-library" aria-label={top.kind === 'route' ? 'Route' : 'Place'}>
+        {groups ? (
+          <OpenGroup
+            view={view}
+            groups={groups}
+            onClose={close}
+            onOpen={open}
+            onShowRide={onShowRide}
+            onShowTraffic={onShowTraffic}
+          />
+        ) : (
+          <GroupsLoading error={groupsError} />
+        )}
+      </section>
+    );
+  }
+
   return (
     <section className="tc-library" aria-labelledby="tc-rides-heading">
       <div className="tc-library-head">
@@ -104,7 +155,34 @@ export function RideLogPanel({ onShowRide, onTripSaved }: RideLogPanelProps) {
         </h2>
       </div>
 
-      {notice ? (
+      <div className="tc-route-type tc-ride-grouping" role="tablist" aria-label="List rides by">
+        {GROUPINGS.map((option) => (
+          <button
+            key={option.id}
+            type="button"
+            role="tab"
+            aria-selected={view.grouping === option.id}
+            className={view.grouping === option.id ? 'tc-route-type-option tc-route-type-option-active' : 'tc-route-type-option'}
+            onClick={() => onViewChange({ grouping: option.id, open: [] })}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+
+      {view.grouping !== 'rides' ? (
+        groups ? (
+          view.grouping === 'routes' ? (
+            <RideRoutesList groups={groups} onOpen={(route) => open('route', route.id)} />
+          ) : (
+            <RidePlacesList groups={groups} onOpen={(place) => open('place', place.id)} />
+          )
+        ) : (
+          <GroupsLoading error={groupsError} />
+        )
+      ) : null}
+
+      {view.grouping === 'rides' && notice ? (
         <div className="tc-library-notice" data-tone={notice.tone} role="status">
           <span>{notice.text}</span>
           {notice.undo ? (
@@ -115,7 +193,7 @@ export function RideLogPanel({ onShowRide, onTripSaved }: RideLogPanelProps) {
         </div>
       ) : null}
 
-      {rides == null ? (
+      {view.grouping !== 'rides' ? null : rides == null ? (
         <div className="tc-saved-loading" role="status">
           <span className="tc-spinner" aria-hidden />
           <span>Loading rides…</span>
@@ -180,7 +258,7 @@ export function RideLogPanel({ onShowRide, onTripSaved }: RideLogPanelProps) {
         </ul>
       )}
 
-      {rides && rides.length > 0 ? (
+      {view.grouping === 'rides' && rides && rides.length > 0 ? (
         <p className="tc-library-hint">
           Tap a ride to see it on the map. Export sends a GPX file for other
           apps; Save as trip keeps its path to ride again.
@@ -209,9 +287,80 @@ function rideMeta(ride: RideRecord): string {
   return parts.join(' · ');
 }
 
-function formatKm(meters: number): string {
-  const km = meters / 1000;
-  return km >= 100 ? `${Math.round(km).toLocaleString()} km` : `${km.toFixed(1)} km`;
+/** The open route or place, with Back to where it was opened from. */
+function OpenGroup({
+  view,
+  groups,
+  onClose,
+  onOpen,
+  onShowRide,
+  onShowTraffic,
+}: {
+  view: RideLibraryView;
+  groups: RideGroups;
+  onClose: () => void;
+  onOpen: (kind: 'route' | 'place', id: string) => void;
+  onShowRide: (ride: RideRecord) => void;
+  onShowTraffic: (title: string, draw: () => void) => void;
+}) {
+  const top = view.open[view.open.length - 1]!;
+  const below = view.open[view.open.length - 2];
+  const backLabel =
+    below?.kind === 'place'
+      ? (groups.places.find((place) => place.id === below.id)?.name ?? 'Back')
+      : below?.kind === 'route'
+        ? 'Route'
+        : GROUPINGS.find((option) => option.id === view.grouping)!.label;
+  const route = top.kind === 'route' ? groups.routes.find((candidate) => candidate.id === top.id) : undefined;
+  const place = top.kind === 'place' ? groups.places.find((candidate) => candidate.id === top.id) : undefined;
+  const gone = !route && !place;
+
+  // Its rides were deleted: back to the list.
+  useEffect(() => {
+    if (gone) onClose();
+  }, [gone, onClose]);
+
+  if (route) {
+    return (
+      <RouteInsightsPanel
+        key={route.id}
+        route={route}
+        backLabel={backLabel}
+        onBack={onClose}
+        onShowRide={onShowRide}
+        onShowTraffic={onShowTraffic}
+      />
+    );
+  }
+  if (place) {
+    return (
+      <PlaceInsightsPanel
+        key={place.id}
+        place={place}
+        groups={groups}
+        backLabel={backLabel}
+        onBack={onClose}
+        onOpenRoute={(next) => onOpen('route', next.id)}
+      />
+    );
+  }
+  return null;
+}
+
+function GroupsLoading({ error }: { error: string | null }) {
+  if (error) {
+    return (
+      <div className="tc-library-notice" data-tone="err" role="alert">
+        <span>{error}</span>
+      </div>
+    );
+  }
+  return (
+    <div className="tc-saved-loading" role="status">
+      <span className="tc-spinner" aria-hidden />
+      <span>Sorting your rides into routes…</span>
+    </div>
+  );
 }
 
 function RecordIcon() {

@@ -38,6 +38,13 @@ export function formatClock(seconds: number): string {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
+const arrivalFormat = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
+
+/** Arrival time on the phone's clock, e.g. "14:35" or "2:35 PM". */
+export function formatArrivalTime(epochMs: number): string {
+  return arrivalFormat.format(new Date(epochMs));
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** When something was saved: "today 12:58", "yesterday", "3 days ago" or "6 Oct". */

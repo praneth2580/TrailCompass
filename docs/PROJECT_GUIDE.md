@@ -57,7 +57,7 @@ TrailCompass is an Android navigation app for motorcycle touring. It is a React 
 | Valhalla WASM routing | Optional. Turns on only if a tile archive is bundled. None is shipped. |
 | Turn-by-turn and rerouting | Works, with known accuracy limits (see §19). |
 | Area map downloads | Works: **Save an area** in the Offline tab (§11). The older region stubs (`region-manager.ts`) are not used. |
-| Ride log | Works. Rides record from the map or while navigating, also with the screen off or the app closed (Android), and are kept with their track and stats (§7.1). |
+| Ride log | Works. Rides record from the map or while navigating, also with the screen off or the app closed (Android), and are kept with their track and stats (§7.1). Repeated rides are sorted into routes and places, with usual times and traffic (§7.1b). |
 | GPS modes | Works. Satellites only, satellites + mobile data & Wi-Fi, or battery saver (§7.1). |
 
 ---
@@ -214,7 +214,7 @@ Refs: `previewToken` (cancels a stale preview), `planTripKey` (a JSON snapshot o
 | Handler | Trigger | What it does |
 |---|---|---|
 | `handleMapClick` | Map tap | In ride mode, the tap only leaves ride mode. During navigation, it does nothing. In map-pick mode, it finishes the pick and returns to Plan. Otherwise it sets the tapped point as the destination on the map, in navigation, and in the trip planner. |
-| `handlePlanRoute` | "Plan route" on the Map banner | Plans from `resolveStart()` (GPS, then last fix, then map centre) to the destination plus waypoints. |
+| `handlePlanRoute` | "Plan route" on the Map tab's trip card | Plans from `resolveStart()` (GPS, then last fix, then map centre) to the destination plus waypoints. |
 | `handlePreviewFromPlan` | "Preview on map" on Plan | The full preview flow (§9.2): switches to the Map tab, waits up to 8 s for GPS, plans, and shows a toast. If it fails, it goes back to Plan. |
 | `handleClearTrip` | "Clear trip" | Cancels any preview and clears both the trip planner and navigation. |
 | `handleRequestMapPick` | "Pick on map" in a sheet | Starts map-pick mode, switches to the Map tab, and shows a loading toast. |
@@ -238,10 +238,11 @@ Refs: `previewToken` (cancels a stale preview), `planTripKey` (a JSON snapshot o
 
 - `MapView` (full bleed)
 - A map-pick banner with Cancel, when picking
-- The **Recenter** button (navigating and not following) or the **Locate** button (not immersive)
+- The **Recenter** button (navigating and not following)
+- A control column under the zoom buttons: `NorthButton` and **Locate** (not immersive), then map overlays and record
 - A HUD with the GPS chip (accuracy, stale flag, km/h) and the `CompassWidget`; tapping the compass opens zen mode
 - In zen mode, only the map and the zen layer: an Exit button and a large `CompassWidget`. `data-zen` steps through `entering`, `on` and `leaving`, timed to the fades in `index.css`
-- A dock with `RouteOptionsPanel` above `NavigationBanner`
+- A dock with `MapTripCard`, or `NavigationBanner` while navigating, paused or in ride view
 - `SaveShareRouteSheet` and `StatusToast`
 
 ---
@@ -263,21 +264,29 @@ All components are presentational. They receive props, and where they need data 
 #### `CompassWidget.tsx`
 An SVG dial (scaled by the CSS variable `--tc-dial`) with a needle that points along the heading, plus the heading in degrees and an accuracy label. The `zen` variant adds 5° ticks, numerals, a north marker, a heading beam and the 8-point direction. The needle angle is unwrapped, so crossing north turns the short way. With `onOpen`, the compass is a button (the HUD opens zen mode with it). It shows an **Enable** button when there is no reading yet or the error mentions permission (iOS-style `requestPermission`).
 
+#### `MapTripCard.tsx`
+The Map tab's one card, in the dock, until the ride starts. It keeps the map free: the route on offer is framed in what the card leaves.
+- **No destination:** a **Where to?** bar opening `StopPickerSheet`, the same search as the Plan tab. Tapping the map drops a pin instead.
+- **Destination:** its name and straight-line distance, **Plan route**, a **+** to the Plan tab for stops, and `RouteOptionsPanel`. An error shows here, with **Try again**. Clearing with the ✕ is only offered with no stops on the trip, so one tap can't lose them.
+- **Planning:** the progress label, the bar when bytes are known, **Run in background** on Android, and **Stop**.
+- **Choosing:** time, distance and arrival, one button per route when there are several, **Start**, and icons for stops, save and share. Tapping the map doesn't change the trip while a route is on offer or stops are planned (`handleMapClick` says why in a toast).
+- **Arrived:** **Done** clears the trip.
+- Route button swatches (`#5b8def`, `#9b7bff`, `#3dbea5`) must match `ALT_COLORS` in `map.service.ts`.
+
 #### `NavigationBanner.tsx`
-The main status and action strip at the bottom of the Map tab.
-- **Text:** while planning or rerouting, the progress label. During navigation, the instruction formatted as `"350 m — Turn right"`. Otherwise, `state.message`.
+The status and action strip while navigating, paused or in ride view. `RouteProgress` and its icons are shared with `MapTripCard`.
+- **Text:** while rerouting, the progress label. During navigation, a turn arrow, the distance to it and the instruction.
 - **Progress bar:** shown only when `percent` and `bytesTotal` are both known (a real byte count).
-- **Remaining:** distance and ETA when choosing or navigating.
-- **Off route** flag.
-- **Run in background** chip while a route is planning, on Android (`background-planning.service.ts`); otherwise **Save / Share** chips when `canSaveRoute` is true and ride mode is off.
-- **Actions:** idle, error or arrived → **Plan route**. Choosing → **Start**. Navigating → **Stop**, plus **Exit** in ride mode.
+- **Remaining:** distance, ETA and arrival time.
+- **Off route** flag, and a GPS warning when the signal is weak or lost.
+- **Save / Share** chips when `canSaveRoute` is true and ride mode is off.
+- **Actions:** **Stop**, plus **Exit** in ride mode.
 
 #### `RouteOptionsPanel.tsx`
-A collapsible bottom sheet with two sections:
-- **Route type:** a radio group for Fastest, Shortest and Less traffic, each with an icon, hint and description.
-- **Routes:** one card per alternative, with a colour swatch that matches the map line, distance and ETA, a "Best" badge on the first, and a **Go** button. A "Show all on map" toggle makes every alternative bold on the map.
-- The panel opens by itself when a new set of alternatives arrives. It tracks `routesSeen` during render to do this, instead of using an effect.
-- Swatch colours (`#5b8def`, `#9b7bff`, `#3dbea5`) must match `ALT_COLORS` in `map.service.ts`.
+How to route, folded to one line in `MapTripCard`. Unfolded: a radio group for Fastest, Shortest and Less traffic, and switches for expressways and voice prompts.
+
+#### `NorthButton.tsx`
+In the map's control column, only while the map is turned and not navigating. The needle shows where north is; tapping puts it back up and flat.
 
 #### `SaveShareRouteSheet.tsx`
 A modal sheet that asks for a route name. The default name comes from `suggestRouteName`, for example `Fastest · 42.3 km · 58 min · Oct 23, 14:05`. When the sheet opens for a new route, the name is reset by comparing an `openKey` during render. The sheet shows a route summary, error text and a busy spinner. Enter submits and Escape closes.
@@ -368,9 +377,18 @@ Top to bottom:
 - `start()`, `pause()`, `resume()`, `finish()` (resolves with the kept ride, or null under 50 m), `discard()`. `getLive()` and `activeSeconds()` for the REC chip and the ride sheet; `subscribeSaved` for the "Saved …" toast.
 - **Recorders.** Android: `RideRecorderService.java`, a `location` foreground service (`stopWithTask="false"`, so it carries on when the app is swiped away; `START_STICKY`) writes `map-packages/rides/<id>.csv` (`time,lat,lon,accuracy,altitude,speed,bearing,satellites`, and `#pause`, `#resume`, `#end` lines), keeps its state in SharedPreferences `trailcompass-ride` and shows distance and a running clock in a notification with Pause/Resume and Finish. `init()` picks up a ride under way, or keeps one finished from the notification while the app was closed. Browser: the page records its own fixes, saved every 15 s (localStorage `tc.webRide`, `rides/<id>.csv`).
 - **Auto record** (localStorage `tc.autoRecordRides`, default on): navigation starting records a ride named after the trip's destination; arriving or stopping finishes it. Rides started by hand aren't finished by navigation.
-- **Track maths** (`ride-track.ts`, tests in `ride-track.test.ts`): `DistanceCounter` (the native notification uses the same rule), `summarizeTrack`, Douglas–Peucker `simplify` (3 m), `encodeTrack`/`decodeTrack` (polyline-style numbers for positions, seconds and heights), `toGpx`, `rideName` ("Morning ride"…).
+- **Track maths** (`ride-track.ts`, tests in `ride-track.test.ts`): `DistanceCounter` (the native notification uses the same rule), `summarizeTrack`, Douglas–Peucker `simplify` (3 m, and 25 m in timing, so stops on straight roads survive; rides kept before this have coarser timing on straights), `encodeTrack`/`decodeTrack` (polyline-style numbers for positions, seconds and heights), `toGpx`, `rideName` ("Morning ride"…).
 - **Storage** (`database/ride-repository.ts`): summaries in Preferences `ride-index`, `ride:<id>`; tracks in `map-packages/rides/<id>.json`.
 - **Map:** the ride being recorded draws as a red line, a past ride from Library as a purple one (`mapService.setRideLine`), with a chip to hide it.
+
+### 7.1b `ride-insights.service.ts` — routes and places of the ride log
+
+- **Trips** (`ride-groups.ts`, `rideTrip`): a ride with waiting at either end cut off and breaks cut out (within 50 m for 5 minutes or more), its path resampled every 50 m or so (at most 400 points). Worked out once per ride and kept in `rides/trips.json`; bump `TRIP_FILE_VERSION` when that changes, and they're worked out again.
+- **Routes** (`groupRoutes`, `sameRoute`): rides are the same route when at least 80% of each lies along the other, they're within 1.4× of each other's length, and they go the same way. A ride is compared with each route's first ride, so routes can't creep into each other. The way back is its own route, since its traffic differs.
+- **Places** (`clusterPlaces`): starts and ends within 400 m gather into a place. Places the rider named stay where they are, under `ride-places`.
+- **Names:** the rider's, else the trip navigation went to, else a saved trip ending there, else Nominatim (`nominatimReverse`, one request a second, position rounded to about 100 m, answers kept in `place-lookups`). Places ridden to or from only once aren't looked up. In Mumbai, Nominatim's `suburb` is often a municipal ward, so wards give way to any other area name. Roads with no name fall back to the neighbourhood.
+- **Analysis** (`ride-insights.ts`, `analyzeRoute`): the route is cut into stretches of 100 m to 1 km; each ride's fixes are placed along it and their time spent on the stretches. A stretch's typical speed is the middle of its rides'. Runs of stretches under 20 km/h, or under 45% of the route's cruising speed, are slow spots, ranked by the time they lose against that cruising speed. `compareByPeriod` sets ways side by side at the same time of day only.
+- **Map:** `showTraffic` draws the route by usual speed (`mapService.setTrafficLines`), with a key in the HUD, framed between the panels (`fitBetweenPanels`).
 
 ### 7.2 `compass.service.ts` — heading
 
@@ -807,6 +825,7 @@ A JSON key-value wrapper over **Capacitor Preferences** (SharedPreferences on An
 |---|---|---|
 | `RouteRepository` (`route-repository.ts`) | `route-index` (ID array), `route:<id>` | Yes, by the route library. `saveRoute` updates `updatedAt`. Lists newest first. |
 | `RideRepository` (`ride-repository.ts`) | `ride-index`, `ride:<id>`; tracks in `map-packages/rides/<id>.json` | Yes: the ride log. |
+| `RideInsightsService` (`ride-insights.service.ts`) | `ride-places` (names the rider gave), `place-lookups` (names found online); `map-packages/rides/trips.json` (each ride's trip, worked out again if lost) | Yes: routes and places of the ride log. |
 
 ### 10.3 Where everything is stored
 
@@ -959,6 +978,7 @@ Turns on an immersive map view automatically once the bike is clearly moving dur
 | Fuel and food on the map | No for India (bundled); elsewhere from the map tiles | OpenFreeMap |
 | Offline map downloads | Yes, once per trip or area (updates fetch only newer builds); waits for Wi-Fi with that setting | OpenFreeMap |
 | Area search | Yes | Nominatim |
+| Names of ride log places and roads | Only for places ridden to or from twice or more, with no name from the rider, navigation or a saved trip, and for telling routes and slow spots apart. Without a connection they show as coordinates or distances. Positions are rounded to about 100 m and answers kept | Nominatim |
 | Fuel and food data updates | Optional; checked daily, the app keeps working on its current copy | GitHub Pages |
 | GPS position and compass | No, in Satellites only mode. The default mode uses mobile data and Wi-Fi when there are some, for a quicker fix; Battery saver needs them | Device (network location: the phone's provider) |
 | A\* routing on cached roads, follow loop, arrival | No | On the phone |

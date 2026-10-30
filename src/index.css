@@ -186,14 +186,12 @@ button {
   filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.45));
 }
 
+/* Turned by MapLibre (marker rotation), glided frame by frame in map.service. */
 .tc-position-arrow-spin {
   display: grid;
   place-items: center;
   width: 36px;
   height: 36px;
-  transform-origin: 50% 58%;
-  transition: transform 120ms linear;
-  will-change: transform;
 }
 
 .tc-position-arrow {
@@ -815,6 +813,263 @@ button {
   pointer-events: auto;
 }
 
+/* ── Trip card: the Map tab from "Where to?" to Start ───── */
+
+.tc-mapcard,
+.tc-mapcard-search {
+  border-radius: var(--tc-radius);
+  background: rgba(8, 16, 12, 0.94);
+  box-shadow: var(--tc-shadow);
+  backdrop-filter: blur(16px);
+}
+
+.tc-mapcard {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-height: 62dvh;
+  padding: 0.7rem 0.75rem;
+  border: 1px solid var(--tc-border);
+  overflow-y: auto;
+}
+
+.tc-mapcard[data-state='choosing'] {
+  border-color: var(--tc-border-strong);
+}
+
+.tc-mapcard-search {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  min-height: 3.6rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--tc-border-strong);
+  color: var(--tc-accent);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tc-mapcard-search:active {
+  background: rgb(20, 30, 22);
+}
+
+.tc-mapcard-search svg {
+  flex-shrink: 0;
+}
+
+.tc-mapcard-search span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.tc-mapcard-search strong {
+  color: var(--tc-text);
+  font-family: var(--tc-font-display);
+  font-size: 1.1rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.tc-mapcard-search small {
+  color: var(--tc-muted);
+  font-size: 0.8rem;
+}
+
+.tc-mapcard-head {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.tc-mapcard-pin {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: var(--tc-radius-sm);
+  background: var(--tc-accent-soft);
+  color: var(--tc-accent);
+}
+
+.tc-mapcard-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+}
+
+.tc-mapcard-title strong {
+  overflow: hidden;
+  font-family: var(--tc-font-display);
+  font-size: 1.08rem;
+  font-weight: 700;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tc-mapcard-title span {
+  color: var(--tc-muted);
+  font-size: 0.85rem;
+  line-height: 1.3;
+}
+
+.tc-mapcard[data-state='choosing'] .tc-mapcard-title span {
+  color: var(--tc-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.tc-mapcard-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: var(--tc-touch);
+  height: var(--tc-touch);
+  border: 1px solid var(--tc-border);
+  border-radius: var(--tc-radius-sm);
+  background: transparent;
+  color: var(--tc-text);
+  cursor: pointer;
+}
+
+.tc-mapcard-head .tc-mapcard-icon {
+  width: 2.5rem;
+  height: 2.5rem;
+  border: none;
+  color: var(--tc-muted);
+}
+
+.tc-mapcard-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.tc-mapcard-icon:active {
+  background: var(--tc-accent-soft);
+  color: var(--tc-accent);
+}
+
+.tc-mapcard-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.tc-mapcard-actions .tc-btn {
+  flex: 1;
+  min-width: 0;
+}
+
+.tc-mapcard-routes {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 0.4rem;
+}
+
+.tc-mapcard-routes button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 0.4rem;
+  min-height: 3.1rem;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--tc-border);
+  border-radius: var(--tc-radius-sm);
+  background: transparent;
+  color: var(--tc-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tc-mapcard-routes button[aria-checked='true'] {
+  border-color: var(--tc-accent);
+  background: var(--tc-accent-soft);
+}
+
+.tc-mapcard-routes i {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+}
+
+.tc-mapcard-routes strong {
+  font-size: 0.92rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tc-mapcard-routes span {
+  grid-column: 2;
+  color: var(--tc-muted);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.tc-mapcard-note,
+.tc-mapcard-alert {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+.tc-mapcard-note {
+  color: var(--tc-muted);
+}
+
+.tc-mapcard-alert {
+  color: var(--tc-danger);
+  font-weight: 600;
+}
+
+/* On its own above "Where to?", it needs a surface for the map not to show through. */
+.tc-map-dock > .tc-mapcard-alert {
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--tc-radius-sm);
+  background: rgba(8, 16, 12, 0.94);
+}
+
+.tc-mapcard-options-toggle {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 2.4rem;
+  padding: 0 0.1rem;
+  border: none;
+  background: none;
+  color: var(--tc-muted);
+  font: inherit;
+  font-size: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tc-mapcard-options-toggle span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tc-mapcard-options-toggle svg[data-open='false'] {
+  transform: rotate(180deg);
+}
+
+.tc-mapcard-options-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding-top: 0.25rem;
+}
+
 /* ── Navigation banner ──────────────────────────────────── */
 
 .tc-nav-banner {
@@ -931,6 +1186,61 @@ button {
   color: var(--tc-danger);
   font-weight: 800;
   font-size: 0.9rem;
+}
+
+/* Mid-ride: turn arrow, distance to the turn, then the instruction. */
+.tc-nav-maneuver {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  min-width: 0;
+}
+
+.tc-nav-maneuver-icon {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: var(--tc-radius-sm);
+  background: var(--tc-accent);
+  color: #1a1205;
+}
+
+.tc-nav-maneuver-icon svg {
+  width: 2.5rem;
+  height: 2.5rem;
+}
+
+.tc-nav-maneuver-copy {
+  min-width: 0;
+}
+
+.tc-nav-maneuver-distance {
+  margin: 0;
+  font-family: var(--tc-font-display);
+  font-size: clamp(1.6rem, 6.5vw, 2.25rem);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.tc-nav-banner-nav .tc-nav-maneuver .tc-nav-instruction {
+  margin-top: 0.1rem;
+  font-size: clamp(1rem, 3.8vw, 1.3rem);
+  overflow-wrap: anywhere;
+}
+
+.tc-nav-gps-warning {
+  margin: 0.3rem 0 0;
+  color: var(--tc-accent);
+  font-weight: 800;
+  font-size: 0.9rem;
+}
+
+.tc-nav-gps-warning[data-level='lost'] {
+  color: var(--tc-danger);
 }
 
 .tc-nav-remaining {
@@ -1837,7 +2147,8 @@ button.tc-plan-point-row[aria-expanded='true'] {
 .tc-toast {
   position: absolute;
   left: 50%;
-  bottom: calc(7.5rem + var(--tc-safe-bottom));
+  /* Over the map, above the trip card however tall it is. */
+  bottom: calc(var(--tc-dock-inset, 7rem) + 0.5rem + var(--tc-safe-bottom));
   transform: translateX(-50%);
   z-index: 8;
   display: inline-flex;
@@ -3290,89 +3601,6 @@ button.tc-plan-point-row[aria-expanded='true'] {
 
 /* ── MapLibre chrome ────────────────────────────────────── */
 
-.tc-route-sheet {
-  position: relative;
-  z-index: 2;
-  width: 100%;
-  max-height: min(52dvh, 24rem);
-  border-radius: 16px;
-  border: 1px solid var(--tc-border);
-  background: rgba(8, 16, 12, 0.94);
-  box-shadow: var(--tc-shadow);
-  backdrop-filter: blur(16px);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
-.tc-route-sheet-collapsed {
-  max-height: none;
-}
-
-.tc-route-sheet-handle {
-  display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: 0.6rem;
-  width: 100%;
-  min-height: 3rem;
-  padding: 0.5rem 0.8rem 0.5rem 0.6rem;
-  border: none;
-  background: transparent;
-  color: var(--tc-text);
-  text-align: left;
-  cursor: pointer;
-}
-
-.tc-route-sheet-icon {
-  display: grid;
-  place-items: center;
-  width: 1.9rem;
-  height: 1.9rem;
-  border-radius: 50%;
-  background: var(--tc-accent-soft);
-  color: var(--tc-accent);
-}
-
-.tc-route-sheet-summary {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  min-width: 0;
-}
-
-.tc-route-sheet-summary strong {
-  flex-shrink: 0;
-  font-family: var(--tc-font-display);
-  font-size: 0.95rem;
-  font-weight: 700;
-}
-
-.tc-route-sheet-summary span {
-  min-width: 0;
-  color: var(--tc-muted);
-  font-size: 0.8rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.tc-route-sheet-chevron {
-  color: var(--tc-muted);
-  font-size: 0.85rem;
-}
-
-.tc-route-sheet-body {
-  display: flex;
-  flex-direction: column;
-  gap: 0.55rem;
-  min-height: 0;
-  padding: 0.7rem 0.8rem 0.8rem;
-  border-top: 1px solid var(--tc-border);
-  overflow: auto;
-}
-
-/* Route type: one segmented control. */
 .tc-route-type {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -3490,128 +3718,6 @@ button.tc-plan-point-row[aria-expanded='true'] {
   font-size: 0.74rem;
 }
 
-/* Routes to pick from. */
-.tc-route-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.tc-route-list-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  color: var(--tc-muted);
-  font-size: 0.76rem;
-  font-weight: 600;
-}
-
-.tc-route-show-all {
-  padding: 0.25rem 0;
-  border: none;
-  background: none;
-  color: var(--tc-accent);
-  font-size: 0.76rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.tc-route-cards {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-  max-height: 9.5rem;
-  overflow: auto;
-}
-
-.tc-route-card {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0 0.35rem 0 0.3rem;
-  border-radius: 10px;
-  border: 1px solid var(--tc-border);
-  background: rgba(255, 255, 255, 0.03);
-  color: var(--tc-text);
-}
-
-.tc-route-card-active {
-  border-color: var(--tc-border-strong);
-  background: var(--tc-accent-soft);
-}
-
-.tc-route-card-pick {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 0.55rem;
-  min-width: 0;
-  min-height: 2.75rem;
-  padding: 0 0.35rem;
-  border: none;
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.tc-route-card-swatch {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.25);
-}
-
-.tc-route-card-title {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  min-width: 0;
-  font-family: var(--tc-font-display);
-  font-size: 0.88rem;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.tc-route-card-badge {
-  padding: 0.05rem 0.35rem;
-  border-radius: 999px;
-  background: rgba(240, 160, 32, 0.22);
-  color: var(--tc-accent);
-  font-size: 0.58rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.tc-route-card-meta {
-  font-family: var(--tc-font-mono);
-  font-size: 0.74rem;
-  color: var(--tc-muted);
-  white-space: nowrap;
-}
-
-.tc-route-card-action {
-  min-width: 2.9rem;
-  min-height: 2.1rem;
-  padding: 0 0.6rem;
-  border-radius: 8px;
-  border: 1px solid var(--tc-border);
-  background: transparent;
-  color: var(--tc-muted);
-  font-family: var(--tc-font-display);
-  font-size: 0.8rem;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.tc-route-card-action-on {
-  border-color: var(--tc-accent);
-  background: var(--tc-accent);
-  color: #1a1205;
-}
-
 .tc-route-progress-spinner {
   width: 1.35rem;
   height: 1.35rem;
@@ -3647,16 +3753,28 @@ button.tc-plan-point-row[aria-expanded='true'] {
   border-color: var(--tc-border-strong);
 }
 
-.tc-locate-btn {
+/* The map's controls, under the zoom buttons: one column, whatever shows. */
+.tc-map-rail {
   position: absolute;
-  top: calc(var(--tc-pad) + var(--tc-safe-top) + 9.5rem);
+  top: calc(var(--tc-pad) + var(--tc-safe-top) + 101px);
   right: calc(var(--tc-pad) + var(--tc-safe-right));
   z-index: 2;
   display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.tc-map-rail > * {
+  pointer-events: auto;
+}
+
+.tc-locate-btn {
+  display: flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
+  width: 46px;
+  height: 46px;
   padding: 0;
   border: 1px solid var(--tc-border);
   border-radius: 12px;
@@ -3666,6 +3784,11 @@ button.tc-plan-point-row[aria-expanded='true'] {
   backdrop-filter: blur(12px);
   cursor: pointer;
   line-height: 0;
+}
+
+/* On the rider: the map is following. */
+.tc-locate-btn[data-following='true'] {
+  color: var(--tc-accent);
 }
 
 .tc-locate-btn svg {
@@ -3730,8 +3853,14 @@ button.tc-plan-point-row[aria-expanded='true'] {
   right: calc(var(--tc-pad) + var(--tc-safe-right)) !important;
 }
 
+.maplibregl-ctrl-top-right .maplibregl-ctrl {
+  margin: 0 !important;
+}
+
+/* Above the trip card: the map's credit has to stay readable. */
 .maplibregl-ctrl-bottom-right,
 .maplibregl-ctrl-bottom-left {
+  bottom: var(--tc-credit-inset, 0px) !important;
   margin-bottom: 0.35rem !important;
 }
 
@@ -3782,9 +3911,7 @@ button.tc-plan-point-row[aria-expanded='true'] {
 }
 
 /* Map overlays: the show/hide-all button and the popup for a tapped place. */
-/* Under the locate button (or where it would be). */
 .tc-locate-btn.tc-poi-btn {
-  top: calc(var(--tc-pad) + var(--tc-safe-top) + 9.5rem + 44px + 10px);
   color: var(--tc-muted);
 }
 
@@ -3792,9 +3919,8 @@ button.tc-plan-point-row[aria-expanded='true'] {
   color: #3dbea5;
 }
 
-/* Ride recording: the record button under the layers button, the REC chip and the sheet. */
+/* Ride recording: the record button, the REC chip and the sheet. */
 .tc-locate-btn.tc-rec-btn {
-  top: calc(var(--tc-pad) + var(--tc-safe-top) + 9.5rem + 2 * (44px + 10px));
   color: var(--tc-muted);
 }
 
@@ -3919,6 +4045,492 @@ button.tc-plan-point-row[aria-expanded='true'] {
   cursor: pointer;
 }
 
+/* A route's usual traffic on the map, with its key. */
+.tc-traffic-key {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.4rem 0.3rem 0.55rem 0.7rem;
+  border-radius: var(--tc-radius-sm);
+  border: 1px solid var(--tc-border);
+  background: var(--tc-panel);
+  backdrop-filter: blur(14px);
+  box-shadow: var(--tc-shadow);
+  font-size: 0.75rem;
+}
+
+.tc-traffic-key-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.25rem;
+}
+
+.tc-traffic-key-head > span {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.tc-traffic-key-head strong {
+  overflow: hidden;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tc-traffic-key small {
+  color: var(--tc-muted);
+  font-size: 0.7rem;
+}
+
+.tc-traffic-key-head button {
+  display: grid;
+  place-items: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--tc-muted);
+  cursor: pointer;
+}
+
+.tc-traffic-key ul {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tc-traffic-key li {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.tc-traffic-key i {
+  width: 1rem;
+  height: 0.35rem;
+  flex-shrink: 0;
+  border-radius: 2px;
+}
+
+/* ── Ride log: routes and places ────────────────────────── */
+
+.tc-trip-chevron {
+  flex-shrink: 0;
+  margin-right: 0.3rem;
+  color: var(--tc-muted);
+}
+
+.tc-place-badge {
+  display: grid;
+  place-items: center;
+  width: 4rem;
+  height: 4rem;
+  flex-shrink: 0;
+  border-radius: 12px;
+  border: 1px solid var(--tc-border);
+  background: var(--tc-accent-soft);
+  color: var(--tc-accent);
+}
+
+.tc-insights {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.tc-insights-back {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 0.15rem;
+  min-height: 2.75rem;
+  max-width: 100%;
+  padding: 0 0.6rem 0 0;
+  border: none;
+  background: none;
+  color: var(--tc-accent);
+  font-family: var(--tc-font-display);
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.tc-insights-head {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.tc-insights-head > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.tc-insights-title {
+  margin: 0;
+  font-family: var(--tc-font-display);
+  font-size: 1.15rem;
+  font-weight: 600;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.tc-insights-sub {
+  margin: 0.15rem 0 0;
+  color: var(--tc-muted);
+  font-size: 0.85rem;
+}
+
+.tc-insights-periods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.tc-chip {
+  min-height: 2.4rem;
+  padding: 0 0.8rem;
+  border-radius: 999px;
+  border: 1px solid var(--tc-border);
+  background: transparent;
+  color: var(--tc-muted);
+  font-family: var(--tc-font-display);
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.tc-chip span {
+  font-weight: 500;
+}
+
+.tc-chip[aria-pressed='true'] {
+  border-color: var(--tc-accent);
+  background: var(--tc-accent);
+  color: #1a1205;
+}
+
+.tc-insights-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  transition: opacity 150ms ease;
+}
+
+/* The last results stay up while the next load, so nothing jumps. */
+.tc-insights-body[data-stale='true'] {
+  opacity: 0.55;
+}
+
+.tc-insights-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.tc-insights-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.6rem 0.7rem;
+  border-radius: var(--tc-radius-sm);
+  border: 1px solid var(--tc-border);
+  background: var(--tc-bg-elevated);
+}
+
+.tc-insights-stat span {
+  color: var(--tc-muted);
+  font-size: 0.75rem;
+}
+
+.tc-insights-stat strong {
+  font-size: 1.2rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.tc-insights-note {
+  margin: 0;
+  color: var(--tc-muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.tc-btn.tc-insights-map {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  width: 100%;
+  min-height: var(--tc-touch);
+}
+
+.tc-insights-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.tc-insights-section .tc-list-heading {
+  margin: 0.15rem 0 0;
+}
+
+/* The usual time by the hour: the bar is the value, the quickest hour in the accent. */
+.tc-hour-bars {
+  display: grid;
+  /* One grid for every row, so all the bars share a baseline and a scale. */
+  grid-template-columns: 3.2rem minmax(0, 1fr) max-content;
+  grid-auto-rows: minmax(1.6rem, auto);
+  align-items: center;
+  gap: 0.15rem 0.5rem;
+  margin: 0;
+  padding: 0.6rem 0.7rem;
+  border-radius: var(--tc-radius-sm);
+  border: 1px solid var(--tc-border);
+  background: var(--tc-bg-elevated);
+  font-size: 0.8rem;
+  list-style: none;
+}
+
+.tc-hour-bars li {
+  display: contents;
+}
+
+.tc-hour-label {
+  color: var(--tc-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.tc-hour-track {
+  display: block;
+}
+
+.tc-hour-bar {
+  display: block;
+  height: 10px;
+  border-radius: 0 4px 4px 0;
+  background: #5f7067;
+}
+
+.tc-hour-value {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.tc-hour-value small {
+  color: var(--tc-muted);
+  font-size: 0.72rem;
+}
+
+.tc-hour-bars li[data-quickest='true'] .tc-hour-label {
+  color: var(--tc-text);
+}
+
+.tc-hour-bars li[data-quickest='true'] .tc-hour-bar {
+  background: var(--tc-accent);
+}
+
+.tc-slow-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tc-slow-spot {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.55rem 0.3rem 0.55rem 0.7rem;
+  border-radius: var(--tc-radius-sm);
+  border: 1px solid var(--tc-border);
+  background: var(--tc-bg-elevated);
+}
+
+.tc-slow-dot {
+  width: 0.7rem;
+  height: 0.7rem;
+  flex-shrink: 0;
+  margin-top: 0.3rem;
+  border-radius: 50%;
+}
+
+.tc-slow-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.tc-slow-text strong {
+  font-family: var(--tc-font-display);
+  font-size: 0.95rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.tc-slow-meta {
+  color: var(--tc-muted);
+  font-size: 0.76rem;
+}
+
+.tc-insights-rides {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border-radius: var(--tc-radius-sm);
+  border: 1px solid var(--tc-border);
+  background: var(--tc-bg-elevated);
+  list-style: none;
+}
+
+.tc-insights-rides li + li {
+  border-top: 1px solid var(--tc-border);
+}
+
+.tc-insights-rides button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 3.7rem;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  min-height: 3.1rem;
+  padding: 0.4rem 0.7rem;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tc-insights-rides button:active {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.tc-insights-ride-when {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  color: var(--tc-muted);
+  font-size: 0.78rem;
+}
+
+.tc-insights-ride-when strong {
+  color: var(--tc-text);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.tc-insights-ride-time {
+  font-size: 0.9rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.tc-insights-ride-diff {
+  color: var(--tc-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.tc-insights-ride-diff[data-sign='faster'] {
+  color: var(--tc-ok);
+}
+
+.tc-insights-ride-diff[data-sign='slower'] {
+  color: var(--tc-danger);
+}
+
+.tc-ways {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.tc-ways-title {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.tc-ways-periods {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0.55rem 0.7rem;
+  border-radius: var(--tc-radius-sm);
+  border: 1px solid var(--tc-border);
+  background: var(--tc-bg-elevated);
+  font-size: 0.8rem;
+}
+
+.tc-ways-periods dt {
+  color: var(--tc-muted);
+  font-size: 0.75rem;
+}
+
+.tc-ways-periods dd {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.tc-ways-periods dd span:last-child {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.tc-ways-periods small {
+  color: var(--tc-muted);
+  font-size: 0.72rem;
+}
+
+.tc-badge {
+  display: inline-block;
+  margin-left: 0.45rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  background: var(--tc-accent-soft);
+  color: var(--tc-accent);
+  font-family: var(--tc-font-body);
+  font-size: 0.68rem;
+  font-weight: 700;
+  vertical-align: 0.1em;
+  white-space: nowrap;
+}
+
+.tc-place-rename {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.tc-place-rename-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
 .tc-sheet-title .tc-rec-dot {
   margin-right: 0.5rem;
   vertical-align: 0.12em;
@@ -4017,6 +4629,21 @@ button.tc-plan-point-row[aria-expanded='true'] {
 
 /* ── Narrow phones ──────────────────────────────────────── */
 
+@media (max-width: 380px) {
+  .tc-mapcard-routes {
+    gap: 0.3rem;
+  }
+
+  .tc-mapcard-routes button {
+    column-gap: 0.3rem;
+    padding: 0.3rem 0.4rem;
+  }
+
+  .tc-mapcard-routes strong {
+    font-size: 0.85rem;
+  }
+}
+
 @media (max-width: 420px) {
   .tc-nav-banner {
     flex-direction: column;
@@ -4070,6 +4697,49 @@ button.tc-plan-point-row[aria-expanded='true'] {
     font-size: 1rem;
   }
 
+  /* The trip card down the side, so the route shows beside it. */
+  .tc-app:not([data-nav='true']):not([data-ride='true']) .tc-map-dock {
+    width: min(21rem, 46vw);
+    max-width: none;
+  }
+
+  .tc-mapcard {
+    gap: 0.4rem;
+    max-height: calc(100dvh - 5.5rem);
+    padding: 0.5rem 0.6rem;
+  }
+
+  .tc-mapcard-pin {
+    display: none;
+  }
+
+  .tc-mapcard-routes button {
+    min-height: 2.6rem;
+  }
+
+  .tc-mapcard-icon {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+
+  .tc-mapcard-options-toggle {
+    min-height: 2rem;
+  }
+
+  .tc-nav-maneuver-icon {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+
+  .tc-nav-maneuver-icon svg {
+    width: 2rem;
+    height: 2rem;
+  }
+
+  .tc-nav-maneuver-distance {
+    font-size: 1.5rem;
+  }
+
   .tc-bottom-nav {
     padding-top: 0.25rem;
     padding-bottom: calc(0.25rem + var(--tc-safe-bottom));
@@ -4099,5 +4769,9 @@ button.tc-plan-point-row[aria-expanded='true'] {
     bottom: 1rem;
     width: min(34rem, calc(100% - 7rem));
     max-width: none;
+  }
+
+  .tc-app:not([data-nav='true']):not([data-ride='true']) .tc-map-dock {
+    width: min(24rem, calc(100% - 7rem));
   }
 }

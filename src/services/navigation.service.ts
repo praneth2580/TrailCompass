@@ -15,7 +15,10 @@ import {
   selectNextInstruction,
   selectNextInstructionIndex,
 } from '../routing/turn-instructions';
-import { remainingFromProjectionMeters } from '../routing/geo';
+import {
+  remainingFromProjectionMeters,
+  segmentBearingDegrees,
+} from '../routing/geo';
 import { mapService } from './map.service';
 import { offlineRoutingAdapter } from '../routing/offline-adapter';
 import type { RoutingProgress } from '../routing/routing-progress';
@@ -295,6 +298,7 @@ export class NavigationService {
       remainingDistanceMeters: route.distanceMeters,
       remainingDurationSeconds: route.durationSeconds,
       offRoute: false,
+      matched: undefined,
       message: undefined,
       progress: undefined,
     });
@@ -378,21 +382,6 @@ export class NavigationService {
       waypoints: this.waypoints,
       places,
     });
-  }
-
-  setShowAllRoutes(showAll: boolean): void {
-    mapService.drawAlternatives(
-      this.alternatives.map((r) => r.coordinates),
-      this.state.selectedAlternativeIndex ?? 0,
-      showAll,
-    );
-    if (this.route) {
-      mapService.drawRoute(
-        this.route.coordinates,
-        this.state.selectedAlternativeIndex ?? 0,
-      );
-    }
-    this.setState({ ...this.state, showAllRoutes: showAll });
   }
 
   async planRoute(
@@ -640,6 +629,21 @@ export class NavigationService {
 
     if (!match.offRoute) this.dropPassedWaypoints(match.alongMeters);
 
+    // On the route: draw the rider on the road and grey out the part behind.
+    const point = !offRoute && !match.offRoute ? match.point : null;
+    const matched = point
+      ? {
+          coordinate: point,
+          bearingDegrees: segmentBearingDegrees(route.coordinates, match.nearestIndex),
+        }
+      : undefined;
+    if (point) {
+      mapService.setRouteProgress(route.coordinates, {
+        segmentIndex: match.nearestIndex,
+        point,
+      });
+    }
+
     const step = selectNextInstructionIndex(
       route.instructions,
       match.alongMeters,
@@ -661,6 +665,7 @@ export class NavigationService {
         distanceToNextManeuverMeters: distanceToNext,
         remainingDistanceMeters: remaining,
         offRoute: true,
+        matched: undefined,
         message: 'Off route — recalculating…',
       });
       void this.tryReroute(position);
@@ -676,6 +681,7 @@ export class NavigationService {
       remainingDistanceMeters: remaining,
       remainingDurationSeconds: remainingDurationSeconds(route, remaining),
       offRoute: false,
+      matched,
       message: status === 'rerouting' ? this.state.message : undefined,
     });
   }
@@ -709,6 +715,7 @@ export class NavigationService {
       ...this.state,
       status: 'rerouting',
       offRoute: true,
+      matched: undefined,
       message: 'Recalculating on roads…',
       progress: {
         phase: 'downloading-roads',

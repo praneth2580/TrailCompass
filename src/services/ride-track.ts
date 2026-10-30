@@ -34,6 +34,12 @@ const MAX_PLAUSIBLE_MPS = 70;
 const CLIMB_STEP_M = 10;
 /** How far the kept track may stray from the recorded one. */
 const SIMPLIFY_METERS = 3;
+/**
+ * How far the kept track may stray in time: where the ride was, at a
+ * moment, from where an even pace between kept points would put it.
+ * Keeps the stops and slowdowns that traffic analysis needs.
+ */
+const SIMPLIFY_TIMING_METERS = 25;
 
 /** Splits the raw file into stretches between pauses. */
 export function parseRawTrack(text: string): TrackFix[][] {
@@ -139,7 +145,7 @@ export function summarizeTrack(raw: TrackFix[][]): RideSummary {
       }
       kept.push(fix);
     }
-    if (kept.length > 0) segments.push(simplify(kept, SIMPLIFY_METERS));
+    if (kept.length > 0) segments.push(simplify(kept, SIMPLIFY_METERS, SIMPLIFY_TIMING_METERS));
   }
 
   // GPS-reported speed is accurate; worked-out speed is the fallback (browsers rarely report speed).
@@ -177,8 +183,13 @@ function bboxOf(segments: TrackFix[][]): [number, number, number, number] | null
   return Number.isFinite(west) ? [west, south, east, north] : null;
 }
 
-/** Douglas–Peucker: drops points within `tolerance` metres of the line through their neighbours. */
-export function simplify(points: TrackFix[], tolerance: number): TrackFix[] {
+/**
+ * Douglas–Peucker: drops points within `tolerance` metres of the line
+ * through their neighbours. With `timingTolerance`, a point also stays
+ * when the ride was more than that far from where an even pace between
+ * its neighbours would have put it, so a stop on a straight road is kept.
+ */
+export function simplify(points: TrackFix[], tolerance: number, timingTolerance = Infinity): TrackFix[] {
   if (points.length <= 2) return points;
   const lat0 = (points[0]!.lat * Math.PI) / 180;
   const xy = points.map((p) => [p.lon * 111_320 * Math.cos(lat0), p.lat * 110_540] as const);
@@ -193,15 +204,22 @@ export function simplify(points: TrackFix[], tolerance: number): TrackFix[] {
     const dx = bx - ax;
     const dy = by - ay;
     const length2 = dx * dx + dy * dy;
+    const t0 = points[first]!.t;
+    const span = points[last]!.t - t0;
     let farthest = -1;
-    let farthestDistance = tolerance;
+    // Past 1, a point strays further than a tolerance allows.
+    let worst = 1;
     for (let i = first + 1; i < last; i++) {
       const [px, py] = xy[i]!;
       const t = length2 > 0 ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / length2)) : 0;
-      const distance = Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
-      if (distance > farthestDistance) {
+      let stray = Math.hypot(px - (ax + t * dx), py - (ay + t * dy)) / tolerance;
+      if (Number.isFinite(timingTolerance)) {
+        const share = span > 0 ? (points[i]!.t - t0) / span : 0;
+        stray = Math.max(stray, Math.hypot(px - (ax + share * dx), py - (ay + share * dy)) / timingTolerance);
+      }
+      if (stray > worst) {
         farthest = i;
-        farthestDistance = distance;
+        worst = stray;
       }
     }
     if (farthest >= 0) {
@@ -244,6 +262,18 @@ export function decodeTrack(track: StoredTrack, startedAt: number): TrackFix[][]
       ...(ele ? { alt: ele[i]! } : {}),
     }));
   });
+}
+
+/** A line as Google-polyline-style text, about a metre precise. */
+export function encodePath(line: Coordinate[]): string {
+  return encodeDeltas(line.flatMap(([lon, lat]) => [Math.round(lat * 1e5), Math.round(lon * 1e5)]), 2);
+}
+
+export function decodePath(text: string): Coordinate[] {
+  const values = decodeDeltas(text, 2);
+  const line: Coordinate[] = [];
+  for (let i = 0; i + 1 < values.length; i += 2) line.push([values[i + 1]! / 1e5, values[i]! / 1e5]);
+  return line;
 }
 
 /**
@@ -309,13 +339,27 @@ export function toGpx(name: string, segments: TrackFix[][]): string {
   ].join('\n');
 }
 
+export type RidePeriod = 'morning' | 'afternoon' | 'evening' | 'night';
+
+/** The part of the day a ride set off in. */
+export function ridePeriod(startedAt: Date): RidePeriod {
+  const hour = startedAt.getHours();
+  if (hour >= 5 && hour < 12) return 'morning';
+  if (hour >= 12 && hour < 17) return 'afternoon';
+  if (hour >= 17 && hour < 21) return 'evening';
+  return 'night';
+}
+
+const PERIOD_RIDE_NAMES: Record<RidePeriod, string> = {
+  morning: 'Morning ride',
+  afternoon: 'Afternoon ride',
+  evening: 'Evening ride',
+  night: 'Night ride',
+};
+
 /** "Morning ride", "Evening ride"… by when it started. */
 export function rideName(startedAt: Date): string {
-  const hour = startedAt.getHours();
-  if (hour >= 5 && hour < 12) return 'Morning ride';
-  if (hour >= 12 && hour < 17) return 'Afternoon ride';
-  if (hour >= 17 && hour < 21) return 'Evening ride';
-  return 'Night ride';
+  return PERIOD_RIDE_NAMES[ridePeriod(startedAt)];
 }
 
 /** Up to `max` evenly spaced points, for a thumbnail. */

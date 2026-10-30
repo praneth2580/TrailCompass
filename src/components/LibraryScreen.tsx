@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { RideRecord } from '../database/ride-repository';
 import type { SavedRoute } from '../types/route';
-import { RideLogPanel } from './RideLogPanel';
+import { RideLogPanel, type RideLibraryView } from './RideLogPanel';
 import { SavedRoutesPanel } from './SavedRoutesPanel';
 
 export type LibraryTab = 'trips' | 'rides';
@@ -11,8 +11,11 @@ interface LibraryScreenProps {
   onOpenRoute: (route: SavedRoute) => void;
   onPlanTrip: () => void;
   onShowRide: (ride: RideRecord) => void;
+  onShowTraffic: (title: string, draw: () => void) => void;
   tab: LibraryTab;
   onTabChange: (tab: LibraryTab) => void;
+  rideView: RideLibraryView;
+  onRideViewChange: (view: RideLibraryView) => void;
 }
 
 const TABS: Array<{ id: LibraryTab; label: string }> = [
@@ -25,8 +28,11 @@ export function LibraryScreen({
   onOpenRoute,
   onPlanTrip,
   onShowRide,
+  onShowTraffic,
   tab,
   onTabChange,
+  rideView,
+  onRideViewChange,
 }: LibraryScreenProps) {
   // A ride saved as a trip shows up when switching back to Trips.
   const [tripsKey, setTripsKey] = useState(0);
@@ -39,7 +45,7 @@ export function LibraryScreen({
         <p className="tc-section-copy">
           {tab === 'trips'
             ? "Trips you've saved, ready to ride again without planning."
-            : "Rides you've recorded, with their track and stats."}
+            : "Rides you've recorded, the routes you repeat, and where traffic slows you."}
         </p>
       </header>
 
@@ -61,7 +67,13 @@ export function LibraryScreen({
       {tab === 'trips' ? (
         <SavedRoutesPanel refreshKey={refreshKey + tripsKey} onOpenRoute={onOpenRoute} onPlanTrip={onPlanTrip} />
       ) : (
-        <RideLogPanel onShowRide={onShowRide} onTripSaved={() => setTripsKey((n) => n + 1)} />
+        <RideLogPanel
+          view={rideView}
+          onViewChange={onRideViewChange}
+          onShowRide={onShowRide}
+          onShowTraffic={onShowTraffic}
+          onTripSaved={() => setTripsKey((n) => n + 1)}
+        />
       )}
     </main>
   );

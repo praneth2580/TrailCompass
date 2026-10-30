@@ -33,6 +33,28 @@ export function turnAngleDegrees(incoming: number, outgoing: number): number {
   return ((outgoing - incoming + 540) % 360) - 180;
 }
 
+/**
+ * Direction of travel along the route at segment `index`. Repeated
+ * vertices have no direction of their own, so the next real segment is
+ * used (or the previous one at the very end).
+ */
+export function segmentBearingDegrees(
+  route: Coordinate[],
+  index: number,
+): number | null {
+  for (let i = Math.max(0, index); i < route.length - 1; i++) {
+    if (haversineMeters(route[i]!, route[i + 1]!) >= 1) {
+      return bearingDegrees(route[i]!, route[i + 1]!);
+    }
+  }
+  for (let i = Math.min(index, route.length - 1); i > 0; i--) {
+    if (haversineMeters(route[i - 1]!, route[i]!) >= 1) {
+      return bearingDegrees(route[i - 1]!, route[i]!);
+    }
+  }
+  return null;
+}
+
 export function polylineLengthMeters(coords: Coordinate[]): number {
   let total = 0;
   for (let i = 1; i < coords.length; i++) {

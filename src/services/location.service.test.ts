@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { GpsFix } from '../types/navigation';
 
 type FixCallback = (fix: { latitude: number; longitude: number; accuracy: number; time: number; satellites: number }) => void;
 
@@ -40,7 +41,7 @@ vi.stubGlobal('localStorage', {
   removeItem: (key: string) => void stored.delete(key),
 });
 
-const { LocationService } = await import('./location.service');
+const { LocationService, gpsWarning } = await import('./location.service');
 
 function position(ageMs: number, latitude = 19.1) {
   return { latitude, longitude: 72.85, accuracy: 6, time: Date.now() - ageMs, satellites: 8 };
@@ -99,3 +100,34 @@ describe('LocationService GPS modes', () => {
   });
 });
 
+
+describe('gpsWarning', () => {
+  const now = 1_000_000;
+  const fix = (overrides: Partial<GpsFix> = {}): GpsFix => ({
+    latitude: 19.1,
+    longitude: 72.85,
+    accuracyMeters: 8,
+    altitudeMeters: null,
+    speedMps: 12,
+    headingDegrees: 90,
+    timestampMs: now - 1_000,
+    ...overrides,
+  });
+
+  it('is quiet while the GPS is fine', () => {
+    expect(gpsWarning(fix(), now)).toBeNull();
+  });
+
+  it('flags a vague fix as weak', () => {
+    expect(gpsWarning(fix({ accuracyMeters: 80 }), now)).toBe('weak');
+  });
+
+  it('calls the signal lost when fixes stop while riding', () => {
+    expect(gpsWarning(fix({ timestampMs: now - 12_000 }), now)).toBe('lost');
+    expect(gpsWarning(null, now)).toBe('lost');
+  });
+
+  it('does not cry wolf at a red light, where Android quietens the GPS', () => {
+    expect(gpsWarning(fix({ speedMps: 0, timestampMs: now - 60_000 }), now)).toBeNull();
+  });
+});
